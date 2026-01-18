@@ -1,51 +1,157 @@
 import { tool } from '@opencode-ai/plugin'
-import { mkdir } from 'node:fs/promises'
-import { init_db } from './db'
+import { create_task, get_db, get_task, update_task } from './db'
+import { init_project } from './util';
+import { isArbeitError } from './error';
 
-interface InitStatus {
-  pluginDirExists: boolean
-  dbFileExists: boolean
+type ArbeitResponse<T> = {
+  success: boolean;
+  data?: T;
+  warnings?: string[];
+  error?: {
+    code: string;
+    message: string;
+    suggestions?: string[];
+  };
 }
 
-export async function dir_exists(directory: string) {
-  try {
-    const stat = await Bun.file(`${directory}`).stat()
-    return stat.isDirectory()
-  } catch (error) {
-    return false
-  }
-}
-
-export async function init_status({ directory}: { directory: string }): Promise<InitStatus> {
-  const pluginDirExists = await dir_exists(`${directory}/.arbeit`)
-  const dbFile = Bun.file(`${directory}/.arbeit/arbeit.db`)
-  const dbFileExists = await dbFile.exists()
-
+function arbeit_success<T>(data: T): ArbeitResponse<T> {
   return {
-    pluginDirExists,
-    dbFileExists
+    success: true,
+    data: data
   }
 }
 
-export async function init_project({ directory }: { directory: string }) {
-  const { pluginDirExists, dbFileExists } = await init_status({ directory })
-  
-  if (!pluginDirExists) {
-    await mkdir(`${directory}/.arbeit`, { recursive: true })
-  }
-  if (!dbFileExists) {
-    await init_db(directory)
+function arbeit_error<T>(error: { code: string; message: string; suggestions?: string[] }): ArbeitResponse<T> {
+  return {
+    success: false,
+    error: error
   }
 }
+
 
 export function arbeit_init({ directory }: { directory: string }) {
  return tool({
     description: 'Initialize arbeit in the current directory',
     args: {},
-    async execute(args, ctx) {
+    async execute() {
         await init_project({ directory })
+        return JSON.stringify(arbeit_success({ initialized: true, path: directory }))
+    }
+  })
+}
+
+export function arbeit_task_create({ directory }: { directory: string }) { 
+  return tool({
+    description: 'Create a new task',
+    args: {
+      title: tool.schema.string().min(1).describe('Brief description'),
+      intent: tool.schema.string().optional().describe('The "why" (immutable after creation)'),
+      parent_id: tool.schema.string().optional().describe('The parent task ID for hierarchy'),
+      status: tool.schema.enum(['open', 'in_progress', 'completed', 'cancelled']).optional().describe('The initial status of the task (default: open)')
+    },
+    async execute(args) {
+      const db = await get_db(directory)
+      const taskId = await create_task(db, args)
+      const task = await get_task(db, taskId)
+
+      // TODO: IMPLEMENT PARENT TASK CHECK AND MAX DEPTH CHECK
+      // if (args.parent_id) {
+      //   const parentTask = await get_task(db, args.parent_id)
+      //   if (!parentTask) {
+      //     return JSON.stringify(arbeit_error({ code: 'PARENT_NOT_FOUND', message: 'Parent task not found' }))
+      //   }
+      // }
+
+      // TODO: TEMP RESPONSE
+      return JSON.stringify(arbeit_success({ task }))
+    }
+  })
+}
+
+/**
+ * 
+  Get a task by ID.
+
+  **Parameters:**
+  | Name | Type | Required | Description |
+  |------|------|----------|-------------|
+  | `task_id` | string | yes | Task ID |
+
+  **Returns:** `{ task: Task, relationships: Relationship[], context: ContextEntry[], progress: ProgressItem[] }`
+
+  **Errors:**
+  - `TASK_NOT_FOUND`: Task doesn't exist
+ */
+export function arbeit_task_get({ directory }: { directory: string }) {
+  return tool({
+    description: 'Get a task by ID',
+    args: {
+      task_id: tool.schema.string().describe('The ID of the task to get'),
+    },
+    async execute(args) {
+      const db = await get_db(directory)
+      const task = await get_task(db, args.task_id)
+      return JSON.stringify(arbeit_success({ task }))
+    }
+  })
+}
+
+/**
+ * 
+  Update a task's properties.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `task_id` | string | yes | Task ID |
+| `title` | string | no | New title |
+| `status` | string | no | New status |
+
+**Returns:** `{ task: Task }`
+
+**Errors:**
+- `TASK_NOT_FOUND`: Task doesn't exist
+
+**Warnings:**
+- `HAS_INCOMPLETE_CHILDREN`: Completing a task with incomplete children
+ */
+export function arbeit_task_update({ directory }: { directory: string }) {
+  return tool({
+    description: 'Update a task by ID',
+    args: {
+      task_id: tool.schema.string().describe('The ID of the task to update'),
+      title: tool.schema.string().min(1).optional().describe('New title'),
+      status: tool.schema.enum(['open', 'in_progress', 'completed', 'cancelled']).optional().describe('New status'),
+    },
+    async execute(args) {
+      try {
+        const db = await get_db(directory)
+
+        if (!args.title && !args.status) {
+          return JSON.stringify(arbeit_error({ code: 'NO_CHANGES_MADE', message: 'No changes made' }))
+        }
+
+        const task = await get_task(db, args.task_id)
+
+        if (!task) {
+          return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: 'Task not found' }))
+        }
+        const updateResult = await update_task(db, args.task_id, { title: args.title, status: args.status })
         
-        return JSON.stringify({ success: true, data: { initialized: true, path: directory } })
+        if (!updateResult) {
+          return JSON.stringify(arbeit_error({ code: 'TASK_UPDATE_FAILED', message: 'An error occurred while updating the task in the database' }))
+        }
+        const updatedTask = await get_task(db, args.task_id)
+        if (!updatedTask) {
+          return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: `Updated task not found after update. task_id: ${args.task_id}` }))
+        }
+        return JSON.stringify(arbeit_success({ task: updatedTask }))
+      } catch (error) {
+        if (isArbeitError(error)) {
+          return JSON.stringify(arbeit_error({ code: error.code, message: error.message, suggestions: error.suggestions }))
+        }
+        throw error
+      }
     }
   })
 }
