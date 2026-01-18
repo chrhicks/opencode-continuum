@@ -18,7 +18,7 @@ export interface UpdateTaskInput {
 export interface Task {
   id: string
   title: string
-  status: 'open' | 'in_progress' | 'completed' | 'cancelled'
+  status: 'open' | 'in_progress' | 'completed' | 'cancelled' | 'deleted'
   intent: string | null
   created_at: string
   updated_at: string
@@ -101,6 +101,25 @@ export async function update_task(db: Database, id: string, taskInput: UpdateTas
   const result = db.run(
     `UPDATE tasks SET ${updates.join(', ')} WHERE id = ?`,
     params
+  )
+
+  return result.changes > 0
+}
+
+export async function task_has_children(db: Database, id: string): Promise<boolean> {
+  const result = db.query<{ child_count: number }, [string]>(
+    `SELECT COUNT(1) AS child_count
+     FROM task_relationships
+     WHERE from_task_id = ? AND type = 'parent_of'`
+  ).get(id)
+
+  return (result?.child_count ?? 0) > 0
+}
+
+export async function soft_delete_task(db: Database, id: string): Promise<boolean> {
+  const result = db.run(
+    `UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?`,
+    ['deleted', new Date().toISOString(), id]
   )
 
   return result.changes > 0

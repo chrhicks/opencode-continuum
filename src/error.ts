@@ -4,6 +4,8 @@ export type ArbeitErrorCode =
   | "INVALID_STATUS"
   | "TASK_CREATE_FAILED"
   | "NO_CHANGES_MADE"
+  | "HAS_CHILDREN"
+  | "TASK_DELETE_FAILED"
 
   export class ArbeitError extends Error {
   code: ArbeitErrorCode

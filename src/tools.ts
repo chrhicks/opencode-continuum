@@ -1,5 +1,5 @@
 import { tool } from '@opencode-ai/plugin'
-import { create_task, get_db, get_task, update_task } from './db'
+import { create_task, get_db, get_task, soft_delete_task, task_has_children, update_task } from './db'
 import { init_project } from './util'
 import { isArbeitError } from './error'
 
@@ -184,6 +184,53 @@ export function arbeit_task_update({ directory }: { directory: string }) {
           return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: `Updated task not found after update. task_id: ${args.task_id}` }))
         }
         return JSON.stringify(arbeit_success({ task: updatedTask }))
+      })
+    }
+  })
+}
+
+/**
+ * Soft delete a task by setting status to deleted.
+ *
+ * Parameters:
+ * - task_id: string (required) Task ID
+ *
+ * Returns: { deleted: boolean }
+ *
+ * Errors:
+ * - TASK_NOT_FOUND: Task doesn't exist
+ * - HAS_CHILDREN: Task has child tasks (must delete or re-parent children first)
+ */
+export function arbeit_task_delete({ directory }: { directory: string }) {
+  return tool({
+    description: 'Delete a task by ID',
+    args: {
+      task_id: tool.schema.string().describe('The ID of the task to delete'),
+    },
+    async execute(args) {
+      return with_arbeit_error_handling(async () => {
+        const db = await get_db(directory)
+        const task = await get_task(db, args.task_id)
+
+        if (!task) {
+          return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: 'Task not found' }))
+        }
+
+        if (task.status === 'deleted') {
+          return JSON.stringify(arbeit_success({ deleted: true }))
+        }
+
+        const hasChildren = await task_has_children(db, args.task_id)
+        if (hasChildren) {
+          return JSON.stringify(arbeit_error({ code: 'HAS_CHILDREN', message: 'Task has child tasks and cannot be deleted' }))
+        }
+
+        const deleted = await soft_delete_task(db, args.task_id)
+        if (!deleted) {
+          return JSON.stringify(arbeit_error({ code: 'TASK_DELETE_FAILED', message: 'An error occurred while deleting the task in the database' }))
+        }
+
+        return JSON.stringify(arbeit_success({ deleted: true }))
       })
     }
   })
