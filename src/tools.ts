@@ -1,5 +1,5 @@
 import { tool } from '@opencode-ai/plugin'
-import { create_task, get_db, get_task, list_tasks, soft_delete_task, task_has_children, update_task } from './db'
+import { create_task, ensure_session_link, get_active_work, get_db, get_task, insert_active_work, list_tasks, remove_active_work, soft_delete_task, task_has_children, update_task } from './db'
 import { init_project } from './util'
 import { isArbeitError } from './error'
 
@@ -257,6 +257,98 @@ export function arbeit_task_list({ directory }: { directory: string }) {
         const db = await get_db(directory)
         const tasks = await list_tasks(db, { status: args.status, parent_id: args.parent_id })
         return JSON.stringify(arbeit_success({ tasks }))
+      })
+    }
+  })
+}
+
+/**
+ * Signal that the agent is starting work on a task.
+ *
+ * Parameters:
+ * - task_id: string (required) Task ID
+ *
+ * Returns: { task: Task, session_linked: boolean }
+ *
+ * Errors:
+ * - TASK_NOT_FOUND: Task doesn't exist
+ * - ALREADY_WORKING: This session is already working on a different task
+ * - TASK_NOT_ACTIVE: Task is completed or cancelled
+ */
+export function arbeit_task_start_work({ directory }: { directory: string }) {
+  return tool({
+    description: 'Signal that the agent is starting work on a task',
+    args: {
+      task_id: tool.schema.string().describe('The ID of the task to start work on')
+    },
+    async execute(args, context) {
+      return with_arbeit_error_handling(async () => {
+        const db = await get_db(directory)
+        const task = await get_task(db, args.task_id)
+
+        if (!task) {
+          return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: 'Task not found' }))
+        }
+
+        if (task.status === 'completed' || task.status === 'cancelled') {
+          return JSON.stringify(arbeit_error({ code: 'TASK_NOT_ACTIVE', message: 'Task is not active' }))
+        }
+
+        const activeWork = await get_active_work(db, context.sessionID)
+        if (activeWork && activeWork.task_id !== args.task_id) {
+          return JSON.stringify(arbeit_error({ code: 'ALREADY_WORKING', message: 'Session already working on a different task' }))
+        }
+
+        if (task.status === 'open') {
+          await update_task(db, args.task_id, { status: 'in_progress' })
+        }
+
+        const sessionLinked = await ensure_session_link(db, { session_id: context.sessionID, task_id: args.task_id })
+
+        if (!activeWork) {
+          await insert_active_work(db, { session_id: context.sessionID, task_id: args.task_id })
+        }
+
+        const updatedTask = await get_task(db, args.task_id)
+        if (!updatedTask) {
+          return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: `Task not found after start work. task_id: ${args.task_id}` }))
+        }
+
+        return JSON.stringify(arbeit_success({ task: updatedTask, session_linked: sessionLinked }))
+      })
+    }
+  })
+}
+
+/**
+ * Signal that the agent is done working on a task (for this session).
+ *
+ * Parameters:
+ * - task_id: string (required) Task ID
+ *
+ * Returns: { stopped: boolean }
+ *
+ * Errors:
+ * - NOT_WORKING_ON_TASK: This session is not working on the task
+ */
+export function arbeit_task_stop_work({ directory }: { directory: string }) {
+  return tool({
+    description: 'Signal that the agent is done working on a task (for this session)',
+    args: {
+      task_id: tool.schema.string().describe('The ID of the task to stop work on')
+    },
+    async execute(args, context) {
+      return with_arbeit_error_handling(async () => {
+        const db = await get_db(directory)
+        const activeWork = await get_active_work(db, context.sessionID)
+
+        if (!activeWork || activeWork.task_id !== args.task_id) {
+          return JSON.stringify(arbeit_error({ code: 'NOT_WORKING_ON_TASK', message: 'Session is not working on this task' }))
+        }
+
+        await remove_active_work(db, { session_id: context.sessionID, task_id: args.task_id })
+
+        return JSON.stringify(arbeit_success({ stopped: true }))
       })
     }
   })

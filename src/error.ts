@@ -6,6 +6,9 @@ export type ArbeitErrorCode =
   | "NO_CHANGES_MADE"
   | "HAS_CHILDREN"
   | "TASK_DELETE_FAILED"
+  | "ALREADY_WORKING"
+  | "NOT_WORKING_ON_TASK"
+  | "TASK_NOT_ACTIVE"
 
   export class ArbeitError extends Error {
   code: ArbeitErrorCode

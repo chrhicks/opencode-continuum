@@ -29,6 +29,12 @@ export interface Task {
   updated_at: string
 }
 
+export interface ActiveWork {
+  session_id: string
+  task_id: string
+  started_at: string
+}
+
 export async function init_db(directory: string): Promise<Database> {
   const db = new Database(`${directory}/.arbeit/arbeit.db`)
   await migrate_db(db)
@@ -165,4 +171,37 @@ export async function list_tasks(db: Database, filters: ListTaskFilters = {}): P
   `
 
   return db.query<Task, Array<string | null>>(sql).all(...params)
+}
+
+export async function get_active_work(db: Database, session_id: string): Promise<ActiveWork | null> {
+  return db
+    .query<ActiveWork, [string]>(`SELECT session_id, task_id, started_at FROM active_work WHERE session_id = ?`)
+    .get(session_id)
+}
+
+export async function insert_active_work(db: Database, input: { session_id: string; task_id: string }): Promise<boolean> {
+  const result = db.run(
+    `INSERT OR IGNORE INTO active_work (session_id, task_id, started_at) VALUES (?, ?, ?)`,
+    [input.session_id, input.task_id, new Date().toISOString()]
+  )
+
+  return result.changes > 0
+}
+
+export async function remove_active_work(db: Database, input: { session_id: string; task_id: string }): Promise<boolean> {
+  const result = db.run(
+    `DELETE FROM active_work WHERE session_id = ? AND task_id = ?`,
+    [input.session_id, input.task_id]
+  )
+
+  return result.changes > 0
+}
+
+export async function ensure_session_link(db: Database, input: { session_id: string; task_id: string }): Promise<boolean> {
+  const result = db.run(
+    `INSERT OR IGNORE INTO session_links (id, task_id, session_id, created_at) VALUES (?, ?, ?, ?)`,
+    [randomId('ses'), input.task_id, input.session_id, new Date().toISOString()]
+  )
+
+  return result.changes > 0
 }
