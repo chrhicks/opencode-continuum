@@ -1,17 +1,17 @@
 import { tool } from '@opencode-ai/plugin'
 import { create_task, get_db, get_task, update_task } from './db'
-import { init_project } from './util';
-import { isArbeitError } from './error';
+import { init_project } from './util'
+import { isArbeitError } from './error'
 
 type ArbeitResponse<T> = {
-  success: boolean;
-  data?: T;
-  warnings?: string[];
+  success: boolean
+  data?: T
+  warnings?: string[]
   error?: {
-    code: string;
-    message: string;
-    suggestions?: string[];
-  };
+    code: string
+    message: string
+    suggestions?: string[]
+  }
 }
 
 function arbeit_success<T>(data: T): ArbeitResponse<T> {
@@ -28,18 +28,55 @@ function arbeit_error<T>(error: { code: string; message: string; suggestions?: s
   }
 }
 
+async function with_arbeit_error_handling(fn: () => Promise<string>): Promise<string> {
+  try {
+    return await fn()
+  } catch (error) {
+    if (isArbeitError(error)) {
+      return JSON.stringify(arbeit_error({ code: error.code, message: error.message, suggestions: error.suggestions }))
+    }
+    throw error
+  }
+}
 
+/**
+ * Initialize arbeit in the current directory.
+ *
+ * Parameters: none
+ *
+ * Returns: { initialized: boolean, path: string }
+ *
+ * Errors:
+ * - ALREADY_INITIALIZED: .arbeit already exists
+ */
 export function arbeit_init({ directory }: { directory: string }) {
  return tool({
     description: 'Initialize arbeit in the current directory',
     args: {},
     async execute() {
+      return with_arbeit_error_handling(async () => {
         await init_project({ directory })
         return JSON.stringify(arbeit_success({ initialized: true, path: directory }))
+      })
     }
   })
 }
 
+/**
+ * Create a new task.
+ *
+ * Parameters:
+ * - title: string (required) Brief description
+ * - intent?: string The "why" (immutable after creation)
+ * - parent_id?: string Parent task ID for hierarchy
+ * - status?: string Initial status (default: open)
+ *
+ * Returns: { task: Task }
+ *
+ * Errors:
+ * - PARENT_NOT_FOUND: Specified parent task doesn't exist
+ * - MAX_DEPTH_EXCEEDED: Would exceed 4-level hierarchy limit
+ */
 export function arbeit_task_create({ directory }: { directory: string }) { 
   return tool({
     description: 'Create a new task',
@@ -50,37 +87,36 @@ export function arbeit_task_create({ directory }: { directory: string }) {
       status: tool.schema.enum(['open', 'in_progress', 'completed', 'cancelled']).optional().describe('The initial status of the task (default: open)')
     },
     async execute(args) {
-      const db = await get_db(directory)
-      const taskId = await create_task(db, args)
-      const task = await get_task(db, taskId)
+      return with_arbeit_error_handling(async () => {
+        const db = await get_db(directory)
+        const taskId = await create_task(db, args)
+        const task = await get_task(db, taskId)
 
-      // TODO: IMPLEMENT PARENT TASK CHECK AND MAX DEPTH CHECK
-      // if (args.parent_id) {
-      //   const parentTask = await get_task(db, args.parent_id)
-      //   if (!parentTask) {
-      //     return JSON.stringify(arbeit_error({ code: 'PARENT_NOT_FOUND', message: 'Parent task not found' }))
-      //   }
-      // }
+        // TODO: IMPLEMENT PARENT TASK CHECK AND MAX DEPTH CHECK
+        // if (args.parent_id) {
+        //   const parentTask = await get_task(db, args.parent_id)
+        //   if (!parentTask) {
+        //     return JSON.stringify(arbeit_error({ code: 'PARENT_NOT_FOUND', message: 'Parent task not found' }))
+        //   }
+        // }
 
-      // TODO: TEMP RESPONSE
-      return JSON.stringify(arbeit_success({ task }))
+        // TODO: TEMP RESPONSE
+        return JSON.stringify(arbeit_success({ task }))
+      })
     }
   })
 }
 
 /**
- * 
-  Get a task by ID.
-
-  **Parameters:**
-  | Name | Type | Required | Description |
-  |------|------|----------|-------------|
-  | `task_id` | string | yes | Task ID |
-
-  **Returns:** `{ task: Task, relationships: Relationship[], context: ContextEntry[], progress: ProgressItem[] }`
-
-  **Errors:**
-  - `TASK_NOT_FOUND`: Task doesn't exist
+ * Get a task by ID.
+ *
+ * Parameters:
+ * - task_id: string (required) Task ID
+ *
+ * Returns: { task: Task, relationships: Relationship[], context: ContextEntry[], progress: ProgressItem[] }
+ *
+ * Errors:
+ * - TASK_NOT_FOUND: Task doesn't exist
  */
 export function arbeit_task_get({ directory }: { directory: string }) {
   return tool({
@@ -89,31 +125,33 @@ export function arbeit_task_get({ directory }: { directory: string }) {
       task_id: tool.schema.string().describe('The ID of the task to get'),
     },
     async execute(args) {
-      const db = await get_db(directory)
-      const task = await get_task(db, args.task_id)
-      return JSON.stringify(arbeit_success({ task }))
+      return with_arbeit_error_handling(async () => {
+        const db = await get_db(directory)
+        const task = await get_task(db, args.task_id)
+        if (!task) {
+          return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: 'Task not found' }))
+        }
+        return JSON.stringify(arbeit_success({ task }))
+      })
     }
   })
 }
 
 /**
- * 
-  Update a task's properties.
-
-**Parameters:**
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `task_id` | string | yes | Task ID |
-| `title` | string | no | New title |
-| `status` | string | no | New status |
-
-**Returns:** `{ task: Task }`
-
-**Errors:**
-- `TASK_NOT_FOUND`: Task doesn't exist
-
-**Warnings:**
-- `HAS_INCOMPLETE_CHILDREN`: Completing a task with incomplete children
+ * Update a task's properties.
+ *
+ * Parameters:
+ * - task_id: string (required) Task ID
+ * - title?: string New title
+ * - status?: string New status
+ *
+ * Returns: { task: Task }
+ *
+ * Errors:
+ * - TASK_NOT_FOUND: Task doesn't exist
+ *
+ * Warnings:
+ * - HAS_INCOMPLETE_CHILDREN: Completing a task with incomplete children
  */
 export function arbeit_task_update({ directory }: { directory: string }) {
   return tool({
@@ -124,7 +162,7 @@ export function arbeit_task_update({ directory }: { directory: string }) {
       status: tool.schema.enum(['open', 'in_progress', 'completed', 'cancelled']).optional().describe('New status'),
     },
     async execute(args) {
-      try {
+      return with_arbeit_error_handling(async () => {
         const db = await get_db(directory)
 
         if (!args.title && !args.status) {
@@ -146,12 +184,7 @@ export function arbeit_task_update({ directory }: { directory: string }) {
           return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: `Updated task not found after update. task_id: ${args.task_id}` }))
         }
         return JSON.stringify(arbeit_success({ task: updatedTask }))
-      } catch (error) {
-        if (isArbeitError(error)) {
-          return JSON.stringify(arbeit_error({ code: error.code, message: error.message, suggestions: error.suggestions }))
-        }
-        throw error
-      }
+      })
     }
   })
 }
