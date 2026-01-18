@@ -15,6 +15,11 @@ export interface UpdateTaskInput {
   status?: 'open' | 'in_progress' | 'completed' | 'cancelled'
 }
 
+export interface ListTaskFilters {
+  status?: 'open' | 'in_progress' | 'completed' | 'cancelled'
+  parent_id?: string | null
+}
+
 export interface Task {
   id: string
   title: string
@@ -123,4 +128,41 @@ export async function soft_delete_task(db: Database, id: string): Promise<boolea
   )
 
   return result.changes > 0
+}
+
+export async function list_tasks(db: Database, filters: ListTaskFilters = {}): Promise<Task[]> {
+  const where: string[] = ['tasks.status != ?']
+  const params: Array<string | null> = ['deleted']
+
+  if (filters.status) {
+    where.push('tasks.status = ?')
+    params.push(filters.status)
+  }
+
+  if (filters.parent_id !== undefined) {
+    if (filters.parent_id === null) {
+      where.push(`NOT EXISTS (
+        SELECT 1 FROM task_relationships
+        WHERE task_relationships.type = 'parent_of'
+          AND task_relationships.to_task_id = tasks.id
+      )`)
+    } else {
+      where.push(`EXISTS (
+        SELECT 1 FROM task_relationships
+        WHERE task_relationships.type = 'parent_of'
+          AND task_relationships.from_task_id = ?
+          AND task_relationships.to_task_id = tasks.id
+      )`)
+      params.push(filters.parent_id)
+    }
+  }
+
+  const sql = `
+    SELECT tasks.id, tasks.title, tasks.status, tasks.intent, tasks.created_at, tasks.updated_at
+    FROM tasks
+    WHERE ${where.join(' AND ')}
+    ORDER BY tasks.created_at ASC
+  `
+
+  return db.query<Task, Array<string | null>>(sql).all(...params)
 }

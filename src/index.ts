@@ -1,5 +1,5 @@
 import type { Plugin } from '@opencode-ai/plugin'
-import { arbeit_init, arbeit_task_create, arbeit_task_delete, arbeit_task_get, arbeit_task_update } from './tools'
+import { arbeit_init, arbeit_task_create, arbeit_task_delete, arbeit_task_get, arbeit_task_list, arbeit_task_update } from './tools'
 
 export const plugin: Plugin = async ({ project, client, $, directory, worktree }) => {
   return {
@@ -9,6 +9,7 @@ export const plugin: Plugin = async ({ project, client, $, directory, worktree }
       arbeit_task_get: arbeit_task_get({ directory }),
       arbeit_task_update: arbeit_task_update({ directory }),
       arbeit_task_delete: arbeit_task_delete({ directory }),
+      arbeit_task_list: arbeit_task_list({ directory }),
     }
   }
 }

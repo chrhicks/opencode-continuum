@@ -1,5 +1,5 @@
 import { tool } from '@opencode-ai/plugin'
-import { create_task, get_db, get_task, soft_delete_task, task_has_children, update_task } from './db'
+import { create_task, get_db, get_task, list_tasks, soft_delete_task, task_has_children, update_task } from './db'
 import { init_project } from './util'
 import { isArbeitError } from './error'
 
@@ -231,6 +231,32 @@ export function arbeit_task_delete({ directory }: { directory: string }) {
         }
 
         return JSON.stringify(arbeit_success({ deleted: true }))
+      })
+    }
+  })
+}
+
+/**
+ * List tasks with optional filters.
+ *
+ * Parameters:
+ * - status?: string Filter by status
+ * - parent_id?: string | null Filter by parent (use null for root tasks)
+ *
+ * Returns: { tasks: Task[] }
+ */
+export function arbeit_task_list({ directory }: { directory: string }) {
+  return tool({
+    description: 'List tasks with optional filters',
+    args: {
+      status: tool.schema.enum(['open', 'in_progress', 'completed', 'cancelled']).optional().describe('Filter by status'),
+      parent_id: tool.schema.string().nullable().optional().describe('Filter by parent (use null for root tasks)')
+    },
+    async execute(args) {
+      return with_arbeit_error_handling(async () => {
+        const db = await get_db(directory)
+        const tasks = await list_tasks(db, { status: args.status, parent_id: args.parent_id })
+        return JSON.stringify(arbeit_success({ tasks }))
       })
     }
   })
