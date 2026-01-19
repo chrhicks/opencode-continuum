@@ -295,7 +295,7 @@ type ArbeitResponse<T> = {
 ### 5.1 Initialization
 
 #### `arbeit_init`
-Initialize arbeit in the current directory.
+Use before any other arbeit tools; creates the local .arbeit database.
 
 **Parameters:** None
 
@@ -309,15 +309,15 @@ Initialize arbeit in the current directory.
 ### 5.2 Task Management
 
 #### `arbeit_task_create`
-Create a new task.
+Use to create a planning unit or subtask; optionally link it into a hierarchy.
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `title` | string | yes | Brief description |
-| `intent` | string | no | The "why" (immutable after creation) |
-| `parent_id` | string | no | Parent task ID for hierarchy |
-| `status` | string | no | Initial status (default: `open`) |
+| `title` | string | yes | Short task label for planning. |
+| `intent` | string | no | Immutable goal or rationale to resume later. |
+| `parent_id` | string | no | Optional parent task to build hierarchy. |
+| `status` | string | no | Initial status; usually open. |
 
 **Returns:** `{ task: Task }`
 
@@ -328,14 +328,29 @@ Create a new task.
 ---
 
 #### `arbeit_task_get`
-Get a task by ID.
+Use to fetch a task; request sections in include for briefing-level context.
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `task_id` | string | yes | Task ID |
+| `task_id` | string | yes | Task ID to fetch. |
+| `include` | string[] | no | Optional sections for context/briefing; omit for core task only. |
 
-**Returns:** `{ task: Task, relationships: Relationship[], context: ContextEntry[], progress: ProgressItem[] }`
+**Include Options:**
+- `relationships`
+- `context`
+- `context_all`
+- `progress`
+- `progress_summary`
+- `parent`
+- `children`
+- `blocked_by`
+- `blocking`
+- `files`
+- `sessions`
+- `recent_events`
+
+**Returns:** `{ task: Task, ... }` (requested sections only)
 
 **Errors:**
 - `TASK_NOT_FOUND`: Task doesn't exist
@@ -343,14 +358,14 @@ Get a task by ID.
 ---
 
 #### `arbeit_task_update`
-Update a task's properties.
+Use to rename a task or advance its status as work progresses.
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `task_id` | string | yes | Task ID |
-| `title` | string | no | New title |
-| `status` | string | no | New status |
+| `task_id` | string | yes | Task ID to update. |
+| `title` | string | no | New title when scope changes. |
+| `status` | string | no | Updated lifecycle state. |
 
 **Returns:** `{ task: Task }`
 
@@ -364,12 +379,12 @@ Update a task's properties.
 ---
 
 #### `arbeit_task_delete`
-Delete a task.
+Use to remove a task that is no longer needed (must have no children).
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `task_id` | string | yes | Task ID |
+| `task_id` | string | yes | Task ID to delete (must have no children). |
 
 **Returns:** `{ deleted: boolean }`
 
@@ -379,23 +394,10 @@ Delete a task.
 
 ---
 
-#### `arbeit_task_list`
-List tasks with optional filters.
-
-**Parameters:**
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `status` | string | no | Filter by status |
-| `parent_id` | string | no | Filter by parent (use `null` for root tasks) |
-
-**Returns:** `{ tasks: Task[] }`
-
----
-
 ### 5.3 Work Session Management
 
 #### `arbeit_task_start_work`
-Signal that the agent is starting work on a task. This:
+Use when actively working in this session; links the session and enables file tracking.
 - Sets task status to `in_progress` (if currently `open`)
 - Links the current OpenCode session to the task
 - Enables automatic file tracking for this session
@@ -403,7 +405,7 @@ Signal that the agent is starting work on a task. This:
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `task_id` | string | yes | Task ID |
+| `task_id` | string | yes | Task ID to actively work on. |
 
 **Returns:** `{ task: Task, session_linked: boolean }`
 
@@ -414,12 +416,12 @@ Signal that the agent is starting work on a task. This:
 ---
 
 #### `arbeit_task_stop_work`
-Signal that the agent is done working on a task (for this session).
+Use when pausing or finishing work in this session; ends active tracking.
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `task_id` | string | yes | Task ID |
+| `task_id` | string | yes | Task ID to stop working on. |
 
 **Returns:** `{ stopped: boolean, files_tracked: number }`
 
@@ -428,37 +430,22 @@ Signal that the agent is done working on a task (for this session).
 ### 5.4 Context Management
 
 #### `arbeit_context_add`
-Add a context entry to a task.
+Use to record decisions, attempts, blockers, or notes; can supersede stale context.
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `task_id` | string | yes | Task ID |
-| `type` | string | yes | Entry type (see 2.2) |
-| `content` | string | yes | The content |
-| `metadata` | object | no | Additional structured data |
+| `task_id` | string | yes | Task this context belongs to. |
+| `type` | string | yes | Context label (decision, blocker, attempt, etc.). |
+| `content` | string | yes | The context text to store. |
+| `metadata` | object | no | Optional structured details (source, links, etc.). |
+| `supersede_entry_id` | string | no | Set to replace a stale entry with this one. |
 
-**Returns:** `{ entry: ContextEntry }`
+**Returns:** `{ entry: ContextEntry, superseded?: ContextEntry }` (when superseding, `entry.metadata` inherits prior metadata unless explicitly provided)
 
 **Errors:**
 - `TASK_NOT_FOUND`: Task doesn't exist
 - `INVALID_TYPE`: Type not recognized
-
----
-
-#### `arbeit_context_supersede`
-Mark a context entry as superseded by a new entry.
-
-**Parameters:**
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `entry_id` | string | yes | The entry being superseded |
-| `new_content` | string | yes | The new content |
-| `type` | string | no | New type (defaults to same as original) |
-
-**Returns:** `{ old_entry: ContextEntry, new_entry: ContextEntry }`
-
-**Errors:**
 - `ENTRY_NOT_FOUND`: Entry doesn't exist
 - `ALREADY_SUPERSEDED`: Entry was already superseded
 
@@ -467,26 +454,26 @@ Mark a context entry as superseded by a new entry.
 ### 5.5 Progress Management
 
 #### `arbeit_progress_add`
-Add progress items to a task.
+Use to track concrete work steps for a task.
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `task_id` | string | yes | Task ID |
-| `items` | string[] | yes | List of work items |
-| `completed` | boolean | no | Whether items are already completed (default: false) |
+| `task_id` | string | yes | Task to attach work items to. |
+| `items` | string[] | yes | List of concrete work steps. |
+| `completed` | boolean | no | Mark items complete on creation. |
 
 **Returns:** `{ items: ProgressItem[] }`
 
 ---
 
 #### `arbeit_progress_complete`
-Mark progress items as completed.
+Use to mark tracked work steps as done.
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `item_ids` | string[] | yes | IDs of items to complete |
+| `item_ids` | string[] | yes | Progress item IDs to mark done. |
 
 **Returns:** `{ completed: ProgressItem[] }`
 
@@ -494,18 +481,19 @@ Mark progress items as completed.
 
 ### 5.6 Relationship Management
 
-#### `arbeit_relationship_add`
-Create a relationship between tasks.
+#### `arbeit_relationship`
+Use to add or remove hierarchy/dependency links between tasks.
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `from_task_id` | string | yes | Source task |
-| `to_task_id` | string | yes | Target task |
-| `type` | string | yes | Relationship type (see 2.3) |
-| `metadata` | object | no | Additional data (e.g., reason) |
+| `action` | string | yes | Whether to add or remove the relationship. |
+| `from_task_id` | string | yes | Source task for the relationship. |
+| `to_task_id` | string | yes | Target task for the relationship. |
+| `type` | string | yes | Relationship type; inverse forms normalize automatically. |
+| `metadata` | object | no | Optional reason/metadata (add only). |
 
-**Returns:** `{ relationship: Relationship }`
+**Returns:** `{ relationship: Relationship }` when `action=add`, `{ removed: boolean }` when `action=remove`
 
 **Errors:**
 - `TASK_NOT_FOUND`: One of the tasks doesn't exist
@@ -515,41 +503,27 @@ Create a relationship between tasks.
 
 ---
 
-#### `arbeit_relationship_remove`
-Remove a relationship between tasks.
-
-**Parameters:**
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `from_task_id` | string | yes | Source task |
-| `to_task_id` | string | yes | Target task |
-| `type` | string | yes | Relationship type |
-
-**Returns:** `{ removed: boolean }`
-
----
-
 ### 5.7 Queries
 
 #### `arbeit_query`
-Execute a named query.
+Use for list and graph queries (tasks, blockers, ancestry).
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `query` | string | yes | Query name |
-| `params` | object | no | Query parameters |
+| `query` | string | yes | Named query to run. |
+| `params` | object | no | Query filters (status, parent_id, task_id). |
 
 **Available Queries:**
 
 | Query Name | Parameters | Description |
 |------------|------------|-------------|
+| `tasks` | `status?`, `parent_id?` | List tasks (parent_id `null` = root tasks) |
 | `blocked_tasks` | `status?` | Tasks that are blocked by other tasks |
 | `blocking_tasks` | `status?` | Tasks that are blocking other tasks |
 | `children_of` | `task_id` | Direct children of a task |
 | `descendants_of` | `task_id` | All descendants (recursive) |
 | `ancestors_of` | `task_id` | All ancestors (recursive) |
-| `root_tasks` | `status?` | Tasks with no parent |
 | `recent_activity` | `since`, `task_id?` | Recent context entries and progress |
 | `stale_tasks` | `days` | Tasks not updated in N days |
 | `files_for_task` | `task_id` | Files associated with a task |
@@ -557,34 +531,38 @@ Execute a named query.
 
 **Returns:** Query-specific results
 
+Note: `root_tasks` can be expressed as `query: "tasks"` with `parent_id: null`.
+
 ---
 
-#### `arbeit_briefing`
-Get a comprehensive briefing for resuming work on a task.
+#### `arbeit_task_get` (briefing-style)
+Use `include` to request a full briefing-style payload. For example:
 
-**Parameters:**
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `task_id` | string | yes | Task ID |
-
-**Returns:**
 ```typescript
-{
-  task: Task;
-  parent?: Task;
-  children: Task[];
-  blocked_by: Task[];
-  blocking: Task[];
-  context: ContextEntry[];  // ordered by date, superseded entries excluded unless requested
-  progress: {
-    completed: ProgressItem[];
-    remaining: ProgressItem[];
-  };
-  files: FileAssociation[];
-  sessions: SessionLink[];
-  recent_events: Event[];  // last N events for this task
-}
+arbeit_task_get({
+  task_id: "tkt-abc002",
+  include: [
+    "parent",
+    "children",
+    "blocked_by",
+    "blocking",
+    "context_all",
+    "progress_summary",
+    "files",
+    "sessions",
+    "recent_events"
+  ]
+})
 ```
+
+---
+
+### 5.8 Migration Notes
+
+- `arbeit_context_supersede` -> `arbeit_context_add` with `supersede_entry_id`
+- `arbeit_briefing` -> `arbeit_task_get` with `include` (see briefing-style example)
+- `arbeit_relationship_add` / `arbeit_relationship_remove` -> `arbeit_relationship` with `action`
+- `arbeit_task_list` -> `arbeit_query` with `query: "tasks"`
 
 ---
 
@@ -616,7 +594,7 @@ All mutations are logged with the following event types:
 | Code | Description | Suggestions |
 |------|-------------|-------------|
 | `NOT_INITIALIZED` | arbeit not initialized in this directory | Call `arbeit_init()` first |
-| `TASK_NOT_FOUND` | Task ID doesn't exist | Check task ID, use `arbeit_task_list()` |
+| `TASK_NOT_FOUND` | Task ID doesn't exist | Check task ID, use `arbeit_query()` with `tasks` |
 | `ENTRY_NOT_FOUND` | Context entry doesn't exist | Check entry ID |
 | `PARENT_NOT_FOUND` | Parent task doesn't exist | Check parent ID, create parent first |
 | `MAX_DEPTH_EXCEEDED` | Would exceed 4-level hierarchy | Restructure task hierarchy |
@@ -726,16 +704,31 @@ arbeit_task_stop_work(task_id: "tkt-abc002")
 # ... later, in a new session ...
 
 # Get briefing to resume
-arbeit_briefing(task_id: "tkt-abc002")
+arbeit_task_get(
+  task_id: "tkt-abc002",
+  include: [
+    "parent",
+    "children",
+    "blocked_by",
+    "blocking",
+    "context_all",
+    "progress_summary",
+    "files",
+    "sessions",
+    "recent_events"
+  ]
+)
 # Returns full context, progress, blockers, etc.
 
 # Continue work
 arbeit_task_start_work(task_id: "tkt-abc002")
 
 # Blocker resolved
-arbeit_context_supersede(
-  entry_id: "ctx-005",
-  new_content: "User confirmed 30 minute timeout"
+arbeit_context_add(
+  task_id: "tkt-abc002",
+  type: "blocker",
+  content: "User confirmed 30 minute timeout",
+  supersede_entry_id: "ctx-005"
 )
 ```
 

@@ -1,21 +1,29 @@
 import { describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import {
+  complete_progress_items,
+  create_context_entry,
+  create_progress_items,
   create_relationship,
   create_task,
   ensure_session_link,
   get_active_work,
   get_children,
+  get_context_entries_for_task,
   get_parents,
+  get_progress_items_for_task,
+  get_progress_summary,
   get_relationships_for_task,
   get_task,
   insert_active_work,
   list_tasks,
+  list_tasks_by_statuses,
   migrate_db,
   relationship_exists,
   remove_active_work,
   remove_relationship,
   soft_delete_task,
+  supersede_context_entry,
   task_has_children,
   update_task,
   validate_relationship_input
@@ -114,6 +122,12 @@ describe('db', () => {
       expect(rootIds).toContain(orphanId)
       expect(rootIds).not.toContain(childId)
 
+      const activeRoots = await list_tasks_by_statuses(db, { statuses: ['open', 'in_progress'], parent_id: null })
+      const activeRootIds = activeRoots.map((task) => task.id)
+      expect(activeRootIds).toContain(parentId)
+      expect(activeRootIds).toContain(orphanId)
+      expect(activeRootIds).not.toContain(childId)
+
       expect(await task_has_children(db, parentId)).toBe(true)
       expect(await task_has_children(db, childId)).toBe(false)
     } finally {
@@ -139,6 +153,108 @@ describe('db', () => {
 
       expect(await remove_active_work(db, { session_id: sessionId, task_id: taskId })).toBe(true)
       expect(await get_active_work(db, sessionId)).toBeNull()
+    } finally {
+      db.close()
+    }
+  })
+
+  test('context entries can be superseded and filtered', async () => {
+    const db = await createTestDb()
+    try {
+      const taskId = await create_task(db, { title: 'Context' })
+      const entry = await create_context_entry(db, {
+        task_id: taskId,
+        type: 'decision',
+        content: 'Use local storage',
+        metadata: { source: 'notes' }
+      })
+
+      const { old_entry, new_entry } = await supersede_context_entry(db, {
+        entry_id: entry.id,
+        new_content: 'Use sqlite',
+        metadata: null
+      })
+
+      expect(old_entry.superseded_by).toBe(new_entry.id)
+      expect(new_entry.metadata).toBeNull()
+
+      const currentOnly = await get_context_entries_for_task(db, taskId)
+      expect(currentOnly).toHaveLength(1)
+      expect(currentOnly[0]?.id).toBe(new_entry.id)
+
+      const allEntries = await get_context_entries_for_task(db, taskId, { include_superseded: true })
+      expect(allEntries).toHaveLength(2)
+    } finally {
+      db.close()
+    }
+  })
+
+  test('progress summary splits completed and remaining', async () => {
+    const db = await createTestDb()
+    try {
+      const taskId = await create_task(db, { title: 'Progress' })
+      db.run(
+        `INSERT INTO progress_items (id, task_id, content, completed, created_at) VALUES (?, ?, ?, ?, ?)`,
+        ['prg-1', taskId, 'Do work', 0, new Date().toISOString()]
+      )
+      db.run(
+        `INSERT INTO progress_items (id, task_id, content, completed, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        ['prg-2', taskId, 'Done work', 1, new Date().toISOString(), new Date().toISOString()]
+      )
+
+      const summary = await get_progress_summary(db, taskId)
+      expect(summary.remaining).toHaveLength(1)
+      expect(summary.completed).toHaveLength(1)
+    } finally {
+      db.close()
+    }
+  })
+
+  test('create_progress_items rejects empty input', async () => {
+    const db = await createTestDb()
+    try {
+      const taskId = await create_task(db, { title: 'Empty' })
+      await expect(create_progress_items(db, { task_id: taskId, items: [] })).rejects.toMatchObject({
+        code: 'NO_CHANGES_MADE'
+      })
+    } finally {
+      db.close()
+    }
+  })
+
+  test('complete_progress_items fails on missing ids without side effects', async () => {
+    const db = await createTestDb()
+    try {
+      const taskId = await create_task(db, { title: 'Missing' })
+      const [item] = await create_progress_items(db, { task_id: taskId, items: ['Item A'] })
+      if (!item) throw new Error('Expected progress item')
+
+      await expect(complete_progress_items(db, { item_ids: [item.id, 'prg-missing'] })).rejects.toMatchObject({
+        code: 'ITEM_NOT_FOUND'
+      })
+
+      const rows = await get_progress_items_for_task(db, taskId)
+      expect(rows[0]?.completed).toBe(false)
+      expect(rows[0]?.completed_at).toBeNull()
+    } finally {
+      db.close()
+    }
+  })
+
+  test('complete_progress_items is idempotent and preserves completed_at', async () => {
+    const db = await createTestDb()
+    try {
+      const taskId = await create_task(db, { title: 'Idempotent' })
+      const [item] = await create_progress_items(db, { task_id: taskId, items: ['Item A'] })
+      if (!item) throw new Error('Expected progress item')
+
+      const first = await complete_progress_items(db, { item_ids: [item.id] })
+      expect(first[0]?.completed).toBe(true)
+      expect(first[0]?.completed_at).not.toBeNull()
+
+      const second = await complete_progress_items(db, { item_ids: [item.id] })
+      expect(second[0]?.completed).toBe(true)
+      expect(second[0]?.completed_at).toBe(first[0]?.completed_at)
     } finally {
       db.close()
     }

@@ -32,6 +32,81 @@ export interface Task {
 }
 
 export type RelationshipType = 'parent_of' | 'blocks' | 'relates_to' | 'duplicates' | 'splits_from'
+
+export type ContextType =
+  | 'decision'
+  | 'rationale'
+  | 'attempt'
+  | 'outcome'
+  | 'blocker'
+  | 'note'
+  | 'reference'
+  | 'user_input'
+
+export const CONTEXT_TYPES: ContextType[] = [
+  'decision',
+  'rationale',
+  'attempt',
+  'outcome',
+  'blocker',
+  'note',
+  'reference',
+  'user_input'
+]
+
+export interface ContextEntry {
+  id: string
+  task_id: string
+  type: ContextType
+  content: string
+  metadata: Record<string, unknown> | null
+  superseded_by: string | null
+  created_at: string
+}
+
+interface ContextEntryRow {
+  id: string
+  task_id: string
+  type: ContextType
+  content: string
+  metadata: string | null
+  superseded_by: string | null
+  created_at: string
+}
+
+export interface ProgressItem {
+  id: string
+  task_id: string
+  content: string
+  completed: boolean
+  created_at: string
+  completed_at: string | null
+}
+
+interface ProgressItemRow {
+  id: string
+  task_id: string
+  content: string
+  completed: number
+  created_at: string
+  completed_at: string | null
+}
+
+export interface SessionLink {
+  id: string
+  task_id: string
+  session_id: string
+  created_at: string
+}
+
+export interface FileAssociation {
+  id: string
+  task_id: string
+  file_path: string
+  operation: 'read' | 'write'
+  session_id: string | null
+  created_at: string
+}
 export type RelationshipInputType = RelationshipType | 'child_of' | 'blocked_by' | 'duplicated_by' | 'split_into'
 
 export interface NormalizedRelationshipInput {
@@ -70,6 +145,11 @@ export interface TaskRelationshipQueryResult {
 
 export interface DescendantQueryResult {
   task_ids: string[]
+}
+
+export interface ProgressSummary {
+  completed: ProgressItem[]
+  remaining: ProgressItem[]
 }
 
 export interface AncestorQueryResult {
@@ -155,6 +235,29 @@ function row_to_relationship(row: RelationshipRow): Relationship {
     type: row.type,
     metadata: parse_metadata(row.metadata),
     created_at: row.created_at
+  }
+}
+
+function row_to_context_entry(row: ContextEntryRow): ContextEntry {
+  return {
+    id: row.id,
+    task_id: row.task_id,
+    type: row.type,
+    content: row.content,
+    metadata: parse_metadata(row.metadata),
+    superseded_by: row.superseded_by,
+    created_at: row.created_at
+  }
+}
+
+function row_to_progress_item(row: ProgressItemRow): ProgressItem {
+  return {
+    id: row.id,
+    task_id: row.task_id,
+    content: row.content,
+    completed: row.completed === 1,
+    created_at: row.created_at,
+    completed_at: row.completed_at
   }
 }
 
@@ -433,6 +536,368 @@ export async function list_tasks(db: Database, filters: ListTaskFilters = {}): P
   `
 
   return db.query<Task, Array<string | null>>(sql).all(...params)
+}
+
+export async function list_tasks_by_statuses(
+  db: Database,
+  filters: { statuses: TaskStatus[]; parent_id?: string | null }
+): Promise<Task[]> {
+  const where: string[] = ['tasks.status != ?']
+  const params: Array<string | null> = ['deleted']
+
+  if (filters.statuses.length > 0) {
+    where.push(`tasks.status IN (${sql_placeholders(filters.statuses.length)})`)
+    params.push(...filters.statuses)
+  }
+
+  if (filters.parent_id !== undefined) {
+    if (filters.parent_id === null) {
+      where.push(`NOT EXISTS (
+        SELECT 1 FROM task_relationships
+        WHERE task_relationships.type = 'parent_of'
+          AND task_relationships.to_task_id = tasks.id
+      )`)
+    } else {
+      where.push(`EXISTS (
+        SELECT 1 FROM task_relationships
+        WHERE task_relationships.type = 'parent_of'
+          AND task_relationships.from_task_id = ?
+          AND task_relationships.to_task_id = tasks.id
+      )`)
+      params.push(filters.parent_id)
+    }
+  }
+
+  const sql = `
+    SELECT tasks.id, tasks.title, tasks.status, tasks.intent, tasks.created_at, tasks.updated_at
+    FROM tasks
+    WHERE ${where.join(' AND ')}
+    ORDER BY tasks.created_at ASC
+  `
+
+  return db.query<Task, Array<string | null>>(sql).all(...params)
+}
+
+export async function create_context_entry(
+  db: Database,
+  input: { task_id: string; type: ContextType; content: string; metadata?: Record<string, unknown> | null }
+): Promise<ContextEntry> {
+  const id = randomId('ctx')
+  const created_at = new Date().toISOString()
+  const metadata = input.metadata ?? null
+  const serializedMetadata = metadata ? serialize_metadata(metadata) : null
+
+  const result = db.run(
+    `INSERT INTO context_entries (id, task_id, type, content, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    [id, input.task_id, input.type, input.content, serializedMetadata, created_at]
+  )
+
+  if (result.changes === 0) {
+    throw new ArbeitError('CONTEXT_CREATE_FAILED', 'Failed to create context entry')
+  }
+
+  return {
+    id,
+    task_id: input.task_id,
+    type: input.type,
+    content: input.content,
+    metadata,
+    superseded_by: null,
+    created_at
+  }
+}
+
+export async function get_context_entry(db: Database, entry_id: string): Promise<ContextEntry | null> {
+  const row = db
+    .query<ContextEntryRow, [string]>(
+      `SELECT id, task_id, type, content, metadata, superseded_by, created_at
+       FROM context_entries
+       WHERE id = ?`
+    )
+    .get(entry_id)
+
+  return row ? row_to_context_entry(row) : null
+}
+
+export async function get_context_entries_for_task(
+  db: Database,
+  task_id: string,
+  options: { include_superseded?: boolean } = {}
+): Promise<ContextEntry[]> {
+  const where = ['task_id = ?']
+  if (!options.include_superseded) {
+    where.push('superseded_by IS NULL')
+  }
+
+  const rows = db
+    .query<ContextEntryRow, [string]>(
+      `SELECT id, task_id, type, content, metadata, superseded_by, created_at
+       FROM context_entries
+       WHERE ${where.join(' AND ')}
+       ORDER BY created_at ASC`
+    )
+    .all(task_id)
+
+  return rows.map(row_to_context_entry)
+}
+
+export async function supersede_context_entry(
+  db: Database,
+  input: { entry_id: string; new_content: string; type?: ContextType; metadata?: Record<string, unknown> | null }
+): Promise<{ old_entry: ContextEntry; new_entry: ContextEntry }> {
+  const existing = await get_context_entry(db, input.entry_id)
+  if (!existing) {
+    throw new ArbeitError('ENTRY_NOT_FOUND', 'Context entry not found')
+  }
+
+  if (existing.superseded_by) {
+    throw new ArbeitError('ALREADY_SUPERSEDED', 'Context entry already superseded')
+  }
+
+  const metadata = input.metadata !== undefined ? input.metadata : existing.metadata
+  const new_entry = await create_context_entry(db, {
+    task_id: existing.task_id,
+    type: input.type ?? existing.type,
+    content: input.new_content,
+    metadata
+  })
+
+  const result = db.run(`UPDATE context_entries SET superseded_by = ? WHERE id = ?`, [new_entry.id, existing.id])
+
+  if (result.changes === 0) {
+    throw new ArbeitError('CONTEXT_SUPERSEDE_FAILED', 'Failed to supersede context entry')
+  }
+
+  return {
+    old_entry: { ...existing, superseded_by: new_entry.id },
+    new_entry
+  }
+}
+
+function sql_placeholders(count: number): string {
+  return Array.from({ length: count }, () => '?').join(', ')
+}
+
+export async function create_progress_items(
+  db: Database,
+  input: { task_id: string; items: string[]; completed?: boolean }
+): Promise<ProgressItem[]> {
+  if (input.items.length === 0) {
+    throw new ArbeitError('NO_CHANGES_MADE', 'No progress items provided', [
+      'Provide at least one progress item in items.'
+    ])
+  }
+
+  const taskExists = await task_exists(db, input.task_id)
+  if (!taskExists) {
+    throw new ArbeitError('TASK_NOT_FOUND', 'Task not found', [
+      'Verify the task_id and try again.',
+      'Use arbeit_task_get to confirm the task exists before adding progress.'
+    ])
+  }
+
+  const insertIds: string[] = []
+  const completed = input.completed === true
+
+  db.run('BEGIN')
+  try {
+    for (const content of input.items) {
+      const id = randomId('prg')
+      const created_at = new Date().toISOString()
+      const completed_at = completed ? created_at : null
+      const result = db.run(
+        `INSERT INTO progress_items (id, task_id, content, completed, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        [id, input.task_id, content, completed ? 1 : 0, created_at, completed_at]
+      )
+
+      if (result.changes === 0) {
+        throw new ArbeitError('NO_CHANGES_MADE', 'No progress items were added', [
+          'Check that items contains valid text values and try again.'
+        ])
+      }
+
+      insertIds.push(id)
+    }
+
+    const rows = db
+      .query<ProgressItemRow, string[]>(
+        `SELECT id, task_id, content, completed, created_at, completed_at
+         FROM progress_items
+         WHERE id IN (${sql_placeholders(insertIds.length)})`
+      )
+      .all(...insertIds)
+
+    if (rows.length !== insertIds.length) {
+      throw new ArbeitError('NO_CHANGES_MADE', 'Some progress items were not created', [
+        'Retry the operation with valid items.'
+      ])
+    }
+
+    db.run('COMMIT')
+
+    const itemsById = new Map(rows.map((row) => [row.id, row_to_progress_item(row)]))
+    return insertIds.map((id) => itemsById.get(id)!).filter(Boolean)
+  } catch (error) {
+    db.run('ROLLBACK')
+    throw error
+  }
+}
+
+export async function complete_progress_items(
+  db: Database,
+  input: { item_ids: string[] }
+): Promise<ProgressItem[]> {
+  if (input.item_ids.length === 0) {
+    throw new ArbeitError('NO_CHANGES_MADE', 'No progress item IDs provided', [
+      'Provide at least one progress item ID in item_ids.'
+    ])
+  }
+
+  const uniqueIds: string[] = []
+  const seen = new Set<string>()
+  for (const id of input.item_ids) {
+    if (!seen.has(id)) {
+      seen.add(id)
+      uniqueIds.push(id)
+    }
+  }
+
+  db.run('BEGIN')
+  try {
+    const rows = db
+      .query<{ id: string }, string[]>(
+        `SELECT id
+         FROM progress_items
+         WHERE id IN (${sql_placeholders(uniqueIds.length)})`
+      )
+      .all(...uniqueIds)
+
+    const found = new Set(rows.map((row) => row.id))
+    const missing = uniqueIds.filter((id) => !found.has(id))
+
+    if (missing.length > 0) {
+      const missingList = missing.join(', ')
+      throw new ArbeitError('ITEM_NOT_FOUND', `Progress items not found: ${missingList}`, [
+        `Missing item_ids: ${missingList}`,
+        'Use arbeit_task_get({ task_id, include: ["progress"] }) to list valid item IDs.',
+        'Create missing items first with arbeit_progress_add.'
+      ])
+    }
+
+    const completionTime = new Date().toISOString()
+    db.run(
+      `UPDATE progress_items
+       SET completed = 1, completed_at = ?
+       WHERE id IN (${sql_placeholders(uniqueIds.length)})
+         AND completed = 0`,
+      [completionTime, ...uniqueIds]
+    )
+
+    const updatedRows = db
+      .query<ProgressItemRow, string[]>(
+        `SELECT id, task_id, content, completed, created_at, completed_at
+         FROM progress_items
+         WHERE id IN (${sql_placeholders(uniqueIds.length)})`
+      )
+      .all(...uniqueIds)
+
+    db.run('COMMIT')
+
+    const itemsById = new Map(updatedRows.map((row) => [row.id, row_to_progress_item(row)]))
+    return uniqueIds.map((id) => itemsById.get(id)!).filter(Boolean)
+  } catch (error) {
+    db.run('ROLLBACK')
+    throw error
+  }
+}
+
+export async function get_progress_items_for_task(db: Database, task_id: string): Promise<ProgressItem[]> {
+  const rows = db
+    .query<ProgressItemRow, [string]>(
+      `SELECT id, task_id, content, completed, created_at, completed_at
+       FROM progress_items
+       WHERE task_id = ?
+       ORDER BY created_at ASC`
+    )
+    .all(task_id)
+
+  return rows.map(row_to_progress_item)
+}
+
+export async function get_progress_summary(db: Database, task_id: string): Promise<ProgressSummary> {
+  const items = await get_progress_items_for_task(db, task_id)
+  return {
+    completed: items.filter((item) => item.completed),
+    remaining: items.filter((item) => !item.completed)
+  }
+}
+
+export async function get_session_links_for_task(db: Database, task_id: string): Promise<SessionLink[]> {
+  return db
+    .query<SessionLink, [string]>(
+      `SELECT id, task_id, session_id, created_at
+       FROM session_links
+       WHERE task_id = ?
+       ORDER BY created_at ASC`
+    )
+    .all(task_id)
+}
+
+export async function get_file_associations_for_task(db: Database, task_id: string): Promise<FileAssociation[]> {
+  return db
+    .query<FileAssociation, [string]>(
+      `SELECT id, task_id, file_path, operation, session_id, created_at
+       FROM file_associations
+       WHERE task_id = ?
+       ORDER BY created_at ASC`
+    )
+    .all(task_id)
+}
+
+export async function get_parent_task(db: Database, task_id: string): Promise<Task | null> {
+  return db
+    .query<Task, [string]>(
+      `SELECT tasks.id, tasks.title, tasks.status, tasks.intent, tasks.created_at, tasks.updated_at
+       FROM tasks
+       INNER JOIN task_relationships
+         ON task_relationships.from_task_id = tasks.id
+       WHERE task_relationships.to_task_id = ?
+         AND task_relationships.type = 'parent_of'
+         AND tasks.status != 'deleted'
+       ORDER BY task_relationships.created_at ASC
+       LIMIT 1`
+    )
+    .get(task_id)
+}
+
+export async function get_blocked_by_tasks(db: Database, task_id: string): Promise<Task[]> {
+  return db
+    .query<Task, [string]>(
+      `SELECT tasks.id, tasks.title, tasks.status, tasks.intent, tasks.created_at, tasks.updated_at
+       FROM tasks
+       INNER JOIN task_relationships
+         ON task_relationships.from_task_id = tasks.id
+       WHERE task_relationships.to_task_id = ?
+         AND task_relationships.type = 'blocks'
+         AND tasks.status != 'deleted'
+       ORDER BY task_relationships.created_at ASC`
+    )
+    .all(task_id)
+}
+
+export async function get_blocking_tasks_for_task(db: Database, task_id: string): Promise<Task[]> {
+  return db
+    .query<Task, [string]>(
+      `SELECT tasks.id, tasks.title, tasks.status, tasks.intent, tasks.created_at, tasks.updated_at
+       FROM tasks
+       INNER JOIN task_relationships
+         ON task_relationships.to_task_id = tasks.id
+       WHERE task_relationships.from_task_id = ?
+         AND task_relationships.type = 'blocks'
+         AND tasks.status != 'deleted'
+       ORDER BY task_relationships.created_at ASC`
+    )
+    .all(task_id)
 }
 
 export async function get_active_work(db: Database, session_id: string): Promise<ActiveWork | null> {
