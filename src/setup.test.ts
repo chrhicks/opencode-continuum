@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { init_status } from './index'
+import { init_status } from './util'
 
 test('init_status empty', async () => {
   const directory = `${process.cwd()}/src/__test__/wrk_no_init`

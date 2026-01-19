@@ -1,5 +1,28 @@
 import { tool } from '@opencode-ai/plugin'
-import { create_task, ensure_session_link, get_active_work, get_db, get_task, insert_active_work, list_tasks, remove_active_work, soft_delete_task, task_has_children, update_task } from './db'
+import {
+  create_relationship,
+  create_task,
+  ensure_session_link,
+  get_active_work,
+  get_db,
+  get_relationships_for_task,
+  get_task,
+  insert_active_work,
+  list_tasks,
+  query_ancestors_of,
+  query_blocked_tasks,
+  query_blocking_tasks,
+  query_children_of,
+  query_descendants_of,
+  remove_active_work,
+  remove_relationship,
+  soft_delete_task,
+  task_has_children,
+  update_task,
+  validate_relationship_input,
+  type RelationshipInputType,
+  type TaskStatus
+} from './db'
 import { init_project } from './util'
 import { isArbeitError } from './error'
 
@@ -89,19 +112,25 @@ export function arbeit_task_create({ directory }: { directory: string }) {
     async execute(args) {
       return with_arbeit_error_handling(async () => {
         const db = await get_db(directory)
-        const taskId = await create_task(db, args)
-        const task = await get_task(db, taskId)
+         const taskId = await create_task(db, args)
+         const task = await get_task(db, taskId)
 
-        // TODO: IMPLEMENT PARENT TASK CHECK AND MAX DEPTH CHECK
-        // if (args.parent_id) {
-        //   const parentTask = await get_task(db, args.parent_id)
-        //   if (!parentTask) {
-        //     return JSON.stringify(arbeit_error({ code: 'PARENT_NOT_FOUND', message: 'Parent task not found' }))
-        //   }
-        // }
+         if (!task) {
+           return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: 'Task not found after create' }))
+         }
 
-        // TODO: TEMP RESPONSE
-        return JSON.stringify(arbeit_success({ task }))
+         if (args.parent_id) {
+           const validation = await validate_relationship_input(db, {
+             from_task_id: args.parent_id,
+             to_task_id: taskId,
+             type: 'parent_of'
+           })
+           await create_relationship(db, { ...validation.normalized })
+         }
+
+         const relationships = await get_relationships_for_task(db, taskId)
+         return JSON.stringify(arbeit_success({ task, relationships }))
+
       })
     }
   })
@@ -127,11 +156,13 @@ export function arbeit_task_get({ directory }: { directory: string }) {
     async execute(args) {
       return with_arbeit_error_handling(async () => {
         const db = await get_db(directory)
-        const task = await get_task(db, args.task_id)
-        if (!task) {
-          return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: 'Task not found' }))
-        }
-        return JSON.stringify(arbeit_success({ task }))
+         const task = await get_task(db, args.task_id)
+         if (!task) {
+           return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: 'Task not found' }))
+         }
+         const relationships = await get_relationships_for_task(db, args.task_id)
+         return JSON.stringify(arbeit_success({ task, relationships }))
+
       })
     }
   })
@@ -349,6 +380,137 @@ export function arbeit_task_stop_work({ directory }: { directory: string }) {
         await remove_active_work(db, { session_id: context.sessionID, task_id: args.task_id })
 
         return JSON.stringify(arbeit_success({ stopped: true }))
+      })
+    }
+  })
+}
+
+export function arbeit_relationship_add({ directory }: { directory: string }) {
+  return tool({
+    description: 'Create a relationship between tasks',
+    args: {
+      from_task_id: tool.schema.string().describe('Source task'),
+      to_task_id: tool.schema.string().describe('Target task'),
+      type: tool.schema.enum([
+        'parent_of',
+        'child_of',
+        'blocks',
+        'blocked_by',
+        'relates_to',
+        'duplicates',
+        'duplicated_by',
+        'splits_from',
+        'split_into'
+      ]).describe('Relationship type'),
+      metadata: tool.schema.object({}).passthrough().optional().describe('Additional metadata')
+    },
+    async execute(args) {
+      return with_arbeit_error_handling(async () => {
+        const db = await get_db(directory)
+        const validation = await validate_relationship_input(db, {
+          from_task_id: args.from_task_id,
+          to_task_id: args.to_task_id,
+          type: args.type as RelationshipInputType
+        })
+
+        const relationship = await create_relationship(db, {
+          ...validation.normalized,
+          metadata: args.metadata
+        })
+
+        return JSON.stringify(arbeit_success({ relationship }))
+      })
+    }
+  })
+}
+
+export function arbeit_relationship_remove({ directory }: { directory: string }) {
+  return tool({
+    description: 'Remove a relationship between tasks',
+    args: {
+      from_task_id: tool.schema.string().describe('Source task'),
+      to_task_id: tool.schema.string().describe('Target task'),
+      type: tool.schema.enum([
+        'parent_of',
+        'child_of',
+        'blocks',
+        'blocked_by',
+        'relates_to',
+        'duplicates',
+        'duplicated_by',
+        'splits_from',
+        'split_into'
+      ]).describe('Relationship type')
+    },
+    async execute(args) {
+      return with_arbeit_error_handling(async () => {
+        const db = await get_db(directory)
+        const removed = await remove_relationship(db, {
+          from_task_id: args.from_task_id,
+          to_task_id: args.to_task_id,
+          type: args.type as RelationshipInputType
+        })
+        return JSON.stringify(arbeit_success({ removed }))
+      })
+    }
+  })
+}
+
+export function arbeit_query({ directory }: { directory: string }) {
+  return tool({
+    description: 'Execute a named query',
+    args: {
+      query: tool.schema.enum([
+        'blocked_tasks',
+        'blocking_tasks',
+        'children_of',
+        'descendants_of',
+        'ancestors_of'
+      ]).describe('Query name'),
+      params: tool.schema
+        .object({
+          status: tool.schema.enum(['open', 'in_progress', 'completed', 'cancelled']).optional(),
+          task_id: tool.schema.string().optional()
+        })
+        .passthrough()
+        .optional()
+    },
+    async execute(args) {
+      return with_arbeit_error_handling(async () => {
+        const db = await get_db(directory)
+        const params = args.params ?? {}
+
+        switch (args.query) {
+          case 'blocked_tasks': {
+            const tasks = await query_blocked_tasks(db, params.status as TaskStatus | undefined)
+            return JSON.stringify(arbeit_success({ tasks }))
+          }
+          case 'blocking_tasks': {
+            const tasks = await query_blocking_tasks(db, params.status as TaskStatus | undefined)
+            return JSON.stringify(arbeit_success({ tasks }))
+          }
+          case 'children_of': {
+            if (!params.task_id) {
+              return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: 'task_id is required' }))
+            }
+            const tasks = await query_children_of(db, params.task_id)
+            return JSON.stringify(arbeit_success({ tasks }))
+          }
+          case 'descendants_of': {
+            if (!params.task_id) {
+              return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: 'task_id is required' }))
+            }
+            const task_ids = await query_descendants_of(db, params.task_id)
+            return JSON.stringify(arbeit_success({ task_ids }))
+          }
+          case 'ancestors_of': {
+            if (!params.task_id) {
+              return JSON.stringify(arbeit_error({ code: 'TASK_NOT_FOUND', message: 'task_id is required' }))
+            }
+            const task_ids = await query_ancestors_of(db, params.task_id)
+            return JSON.stringify(arbeit_success({ task_ids }))
+          }
+        }
       })
     }
   })

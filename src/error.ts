@@ -9,6 +9,12 @@ export type ArbeitErrorCode =
   | "ALREADY_WORKING"
   | "NOT_WORKING_ON_TASK"
   | "TASK_NOT_ACTIVE"
+  | "RELATIONSHIP_CREATE_FAILED"
+  | "INVALID_TYPE"
+  | "RELATIONSHIP_EXISTS"
+  | "CIRCULAR_DEPENDENCY"
+  | "MAX_DEPTH_EXCEEDED"
+  | "PARENT_NOT_FOUND"
 
   export class ArbeitError extends Error {
   code: ArbeitErrorCode

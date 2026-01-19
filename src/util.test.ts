@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
 import { rm, mkdir } from 'node:fs/promises'
 import { Database } from 'bun:sqlite'
-import { init_project, init_status } from './index'
+import { init_project, init_status } from './util'
 
 const TEST_DIR = `${process.cwd()}/src/__test__`
 
