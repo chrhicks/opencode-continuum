@@ -1,17 +1,17 @@
 import { Database } from 'bun:sqlite'
 import { randomId } from './db.utils'
-import { init_status_v2 } from './util.v2.ts'
+import { init_status } from './util'
 import { ArbeitError } from './error'
-import { getMigrationSQLV2 } from './migration_v2'
+import { getMigrationSQL } from './migration'
 
-export type TaskStatusV2 = 'open' | 'in_progress' | 'completed' | 'cancelled'
-export type TaskTypeV2 = 'epic' | 'feature' | 'bug' | 'investigation' | 'chore'
+export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled'
+export type TaskType = 'epic' | 'feature' | 'bug' | 'investigation' | 'chore'
 
-export interface TaskV2 {
+export interface Task {
   id: string
   title: string
-  type: TaskTypeV2
-  status: TaskStatusV2 | 'deleted'
+  type: TaskType
+  status: TaskStatus | 'deleted'
   intent: string | null
   description: string | null
   plan: string | null
@@ -21,10 +21,10 @@ export interface TaskV2 {
   updated_at: string
 }
 
-export interface CreateTaskInputV2 {
+export interface CreateTaskInput {
   title: string
-  type: TaskTypeV2
-  status?: TaskStatusV2
+  type: TaskType
+  status?: TaskStatus
   intent?: string | null
   description?: string | null
   plan?: string | null
@@ -32,10 +32,10 @@ export interface CreateTaskInputV2 {
   blocked_by?: string[] | null
 }
 
-export interface UpdateTaskInputV2 {
+export interface UpdateTaskInput {
   title?: string
-  type?: TaskTypeV2
-  status?: TaskStatusV2
+  type?: TaskType
+  status?: TaskStatus
   intent?: string | null
   description?: string | null
   plan?: string | null
@@ -43,14 +43,14 @@ export interface UpdateTaskInputV2 {
   blocked_by?: string[] | null
 }
 
-export interface ListTaskFiltersV2 {
-  status?: TaskStatusV2
+export interface ListTaskFilters {
+  status?: TaskStatus
   parent_id?: string | null
 }
 
-const TASK_TYPES_V2: TaskTypeV2[] = ['epic', 'feature', 'bug', 'investigation', 'chore']
+const TASK_TYPES: TaskType[] = ['epic', 'feature', 'bug', 'investigation', 'chore']
 
-const TEMPLATE_TYPE_MAP: Record<TemplateNameV2, TaskTypeV2> = {
+const TEMPLATE_TYPE_MAP: Record<TemplateName, TaskType> = {
   epic: 'epic',
   feature: 'feature',
   bug: 'bug',
@@ -58,15 +58,15 @@ const TEMPLATE_TYPE_MAP: Record<TemplateNameV2, TaskTypeV2> = {
   chore: 'chore'
 }
 
-export type TemplateNameV2 = 'epic' | 'feature' | 'bug' | 'investigation' | 'chore'
+export type TemplateName = 'epic' | 'feature' | 'bug' | 'investigation' | 'chore'
 
-export interface TemplateRecommendationV2 {
-  name: TemplateNameV2
-  type: TaskTypeV2
+export interface TemplateRecommendation {
+  name: TemplateName
+  type: TaskType
   plan_template: string
 }
 
-export const TEMPLATE_RECOMMENDATIONS_V2: Record<TemplateNameV2, TemplateRecommendationV2> = {
+export const TEMPLATE_RECOMMENDATIONS: Record<TemplateName, TemplateRecommendation> = {
   epic: {
     name: 'epic',
     type: 'epic',
@@ -94,11 +94,11 @@ export const TEMPLATE_RECOMMENDATIONS_V2: Record<TemplateNameV2, TemplateRecomme
   }
 }
 
-interface TaskRowV2 {
+interface TaskRow {
   id: string
   title: string
-  type: TaskTypeV2
-  status: TaskStatusV2 | 'deleted'
+  type: TaskType
+  status: TaskStatus | 'deleted'
   intent: string | null
   description: string | null
   plan: string | null
@@ -120,7 +120,7 @@ function parse_blocked_by(value: string | null): string[] {
   }
 }
 
-function row_to_task(row: TaskRowV2): TaskV2 {
+function row_to_task(row: TaskRow): Task {
   return {
     id: row.id,
     title: row.title,
@@ -136,17 +136,17 @@ function row_to_task(row: TaskRowV2): TaskV2 {
   }
 }
 
-export async function get_db_v2(directory: string): Promise<Database> {
-  const status = await init_status_v2({ directory })
+export async function get_db(directory: string): Promise<Database> {
+  const status = await init_status({ directory })
 
   if (!status.pluginDirExists) {
     throw new ArbeitError('NOT_INITIALIZED', 'Arbeit is not initialized in this directory', [
-      'Run `arbeit_v2_init()` to initialize arbeit v2 in this directory'
+      'Run `arbeit_init()` to initialize arbeit in this directory'
     ])
   }
   if (!status.dbFileExists) {
-    throw new ArbeitError('NOT_INITIALIZED', 'Arbeit v2 database file does not exist', [
-      'Run `arbeit_v2_init()` to initialize arbeit v2 in this directory'
+    throw new ArbeitError('NOT_INITIALIZED', 'Arbeit database file does not exist', [
+      'Run `arbeit_init()` to initialize arbeit in this directory'
     ])
   }
 
@@ -154,36 +154,36 @@ export async function get_db_v2(directory: string): Promise<Database> {
     return dbCache.get(directory)!
   }
 
-  const db = new Database(`${directory}/.arbeit/arbeit_v2.db`)
+  const db = new Database(`${directory}/.arbeit/arbeit.db`)
   dbCache.set(directory, db)
   return db
 }
 
-export async function init_db_v2(directory: string): Promise<void> {
-  const db = new Database(`${directory}/.arbeit/arbeit_v2.db`)
-  const migrationSQL = await getMigrationSQLV2()
+export async function init_db(directory: string): Promise<void> {
+  const db = new Database(`${directory}/.arbeit/arbeit.db`)
+  const migrationSQL = await getMigrationSQL()
   db.exec(migrationSQL)
   db.close()
 }
 
-export function is_valid_task_type(type: string): type is TaskTypeV2 {
-  return TASK_TYPES_V2.includes(type as TaskTypeV2)
+export function is_valid_task_type(type: string): type is TaskType {
+  return TASK_TYPES.includes(type as TaskType)
 }
 
-export function resolve_template_type(template?: string): TaskTypeV2 | null {
+export function resolve_template_type(template?: string): TaskType | null {
   if (!template) return null
-  return TEMPLATE_TYPE_MAP[template as TemplateNameV2] ?? null
+  return TEMPLATE_TYPE_MAP[template as TemplateName] ?? null
 }
 
-export function get_template_recommendation(template: TemplateNameV2): TemplateRecommendationV2 {
-  return TEMPLATE_RECOMMENDATIONS_V2[template]
+export function get_template_recommendation(template: TemplateName): TemplateRecommendation {
+  return TEMPLATE_RECOMMENDATIONS[template]
 }
 
-export function list_template_recommendations(): TemplateRecommendationV2[] {
-  return Object.values(TEMPLATE_RECOMMENDATIONS_V2)
+export function list_template_recommendations(): TemplateRecommendation[] {
+  return Object.values(TEMPLATE_RECOMMENDATIONS)
 }
 
-export function validate_task_input(input: CreateTaskInputV2): string[] {
+export function validate_task_input(input: CreateTaskInput): string[] {
   const missing: string[] = []
   if (!input.title?.trim()) missing.push('title')
 
@@ -208,7 +208,7 @@ export function validate_task_input(input: CreateTaskInputV2): string[] {
   return missing
 }
 
-export function validate_status_transition(task: TaskV2, nextStatus: TaskStatusV2): string[] {
+export function validate_status_transition(task: Task, nextStatus: TaskStatus): string[] {
   const missing: string[] = []
   if (nextStatus === 'in_progress') {
     if (['feature', 'bug', 'investigation', 'chore'].includes(task.type)) {
@@ -226,12 +226,12 @@ export function validate_status_transition(task: TaskV2, nextStatus: TaskStatusV
   return missing
 }
 
-export async function has_open_blockers(db: Database, task: TaskV2): Promise<string[]> {
+export async function has_open_blockers(db: Database, task: Task): Promise<string[]> {
   if (task.blocked_by.length === 0) return []
   const placeholders = task.blocked_by.map(() => '?').join(', ')
   const rows = db
     .query<{ id: string; status: string }, string[]>(
-      `SELECT id, status FROM tasks_v2 WHERE id IN (${placeholders}) AND status != 'deleted'`
+      `SELECT id, status FROM tasks WHERE id IN (${placeholders}) AND status != 'deleted'`
     )
     .all(...task.blocked_by)
 
@@ -239,9 +239,9 @@ export async function has_open_blockers(db: Database, task: TaskV2): Promise<str
   return rows.filter((row) => open.has(row.status)).map((row) => row.id)
 }
 
-async function task_exists_v2(db: Database, task_id: string): Promise<boolean> {
+async function task_exists(db: Database, task_id: string): Promise<boolean> {
   const row = db.query<{ count: number }, [string]>(
-    `SELECT COUNT(1) AS count FROM tasks_v2 WHERE id = ? AND status != 'deleted'`
+    `SELECT COUNT(1) AS count FROM tasks WHERE id = ? AND status != 'deleted'`
   ).get(task_id)
   return (row?.count ?? 0) > 0
 }
@@ -270,7 +270,7 @@ async function validate_blockers(db: Database, blockers: string[]): Promise<stri
   const placeholders = unique.map(() => '?').join(', ')
   const rows = db
     .query<{ id: string }, string[]>(
-      `SELECT id FROM tasks_v2 WHERE id IN (${placeholders}) AND status != 'deleted'`
+      `SELECT id FROM tasks WHERE id IN (${placeholders}) AND status != 'deleted'`
     )
     .all(...unique)
 
@@ -278,7 +278,7 @@ async function validate_blockers(db: Database, blockers: string[]): Promise<stri
   return unique.filter((id) => !found.has(id))
 }
 
-export async function create_task_v2(db: Database, input: CreateTaskInputV2): Promise<TaskV2> {
+export async function create_task(db: Database, input: CreateTaskInput): Promise<Task> {
   const id = randomId('tkt')
   const created_at = new Date().toISOString()
   const updated_at = created_at
@@ -287,7 +287,7 @@ export async function create_task_v2(db: Database, input: CreateTaskInputV2): Pr
   validate_blocker_list(id, blocked_by)
 
   if (input.parent_id) {
-    const parentExists = await task_exists_v2(db, input.parent_id)
+    const parentExists = await task_exists(db, input.parent_id)
     if (!parentExists) {
       throw new ArbeitError('PARENT_NOT_FOUND', 'Parent task not found', [
         'Verify parent_id and try again.'
@@ -303,7 +303,7 @@ export async function create_task_v2(db: Database, input: CreateTaskInputV2): Pr
   }
 
   const result = db.run(
-    `INSERT INTO tasks_v2 (id, title, type, status, intent, description, plan, parent_id, blocked_by, created_at, updated_at)
+    `INSERT INTO tasks (id, title, type, status, intent, description, plan, parent_id, blocked_by, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
     [
       id,
@@ -324,9 +324,9 @@ export async function create_task_v2(db: Database, input: CreateTaskInputV2): Pr
     throw new ArbeitError('TASK_CREATE_FAILED', 'Failed to create task')
   }
 
-  const row = db.query<TaskRowV2, [string]>(
+  const row = db.query<TaskRow, [string]>(
     `SELECT id, title, type, status, intent, description, plan, parent_id, blocked_by, created_at, updated_at
-     FROM tasks_v2 WHERE id = ?`
+     FROM tasks WHERE id = ?`
   ).get(id)
 
   if (!row) {
@@ -336,13 +336,13 @@ export async function create_task_v2(db: Database, input: CreateTaskInputV2): Pr
   return row_to_task(row)
 }
 
-export async function update_task_v2(db: Database, task_id: string, input: UpdateTaskInputV2): Promise<TaskV2> {
+export async function update_task(db: Database, task_id: string, input: UpdateTaskInput): Promise<Task> {
   const updates: string[] = []
   const params: Array<string | null> = []
 
   if (input.parent_id !== undefined) {
     if (input.parent_id) {
-      const parentExists = await task_exists_v2(db, input.parent_id)
+      const parentExists = await task_exists(db, input.parent_id)
       if (!parentExists) {
         throw new ArbeitError('PARENT_NOT_FOUND', 'Parent task not found', [
           'Verify parent_id and try again.'
@@ -403,7 +403,7 @@ export async function update_task_v2(db: Database, task_id: string, input: Updat
   params.push(task_id)
 
   const result = db.run(
-    `UPDATE tasks_v2 SET ${updates.join(', ')} WHERE id = ?`,
+    `UPDATE tasks SET ${updates.join(', ')} WHERE id = ?`,
     params
   )
 
@@ -411,9 +411,9 @@ export async function update_task_v2(db: Database, task_id: string, input: Updat
     throw new ArbeitError('TASK_UPDATE_FAILED', 'Failed to update task')
   }
 
-  const row = db.query<TaskRowV2, [string]>(
+  const row = db.query<TaskRow, [string]>(
     `SELECT id, title, type, status, intent, description, plan, parent_id, blocked_by, created_at, updated_at
-     FROM tasks_v2 WHERE id = ?`
+     FROM tasks WHERE id = ?`
   ).get(task_id)
 
   if (!row) {
@@ -423,16 +423,16 @@ export async function update_task_v2(db: Database, task_id: string, input: Updat
   return row_to_task(row)
 }
 
-export async function get_task_v2(db: Database, task_id: string): Promise<TaskV2 | null> {
-  const row = db.query<TaskRowV2, [string]>(
+export async function get_task(db: Database, task_id: string): Promise<Task | null> {
+  const row = db.query<TaskRow, [string]>(
     `SELECT id, title, type, status, intent, description, plan, parent_id, blocked_by, created_at, updated_at
-     FROM tasks_v2 WHERE id = ?`
+     FROM tasks WHERE id = ?`
   ).get(task_id)
 
   return row ? row_to_task(row) : null
 }
 
-export async function list_tasks_v2(db: Database, filters: ListTaskFiltersV2 = {}): Promise<TaskV2[]> {
+export async function list_tasks(db: Database, filters: ListTaskFilters = {}): Promise<Task[]> {
   const where: string[] = ['status != ?']
   const params: Array<string | null> = ['deleted']
 
@@ -452,19 +452,19 @@ export async function list_tasks_v2(db: Database, filters: ListTaskFiltersV2 = {
 
   const sql = `
     SELECT id, title, type, status, intent, description, plan, parent_id, blocked_by, created_at, updated_at
-    FROM tasks_v2
+    FROM tasks
     WHERE ${where.join(' AND ')}
     ORDER BY created_at ASC
   `
 
-  const rows = db.query<TaskRowV2, Array<string | null>>(sql).all(...params)
+  const rows = db.query<TaskRow, Array<string | null>>(sql).all(...params)
   return rows.map(row_to_task)
 }
 
-export async function list_tasks_by_statuses_v2(
+export async function list_tasks_by_statuses(
   db: Database,
-  filters: { statuses: TaskStatusV2[]; parent_id?: string | null }
-): Promise<TaskV2[]> {
+  filters: { statuses: TaskStatus[]; parent_id?: string | null }
+): Promise<Task[]> {
   const where: string[] = ['status != ?']
   const params: Array<string | null> = ['deleted']
 
@@ -485,11 +485,11 @@ export async function list_tasks_by_statuses_v2(
 
   const sql = `
     SELECT id, title, type, status, intent, description, plan, parent_id, blocked_by, created_at, updated_at
-    FROM tasks_v2
+    FROM tasks
     WHERE ${where.join(' AND ')}
     ORDER BY created_at ASC
   `
 
-  const rows = db.query<TaskRowV2, Array<string | null>>(sql).all(...params)
+  const rows = db.query<TaskRow, Array<string | null>>(sql).all(...params)
   return rows.map(row_to_task)
 }

@@ -1,29 +1,29 @@
 import { tool } from '@opencode-ai/plugin'
 import { ArbeitError, isArbeitError } from './error'
-import { init_project_v2 } from './util.v2.ts'
+import { init_project } from './util'
 import {
-  TEMPLATE_RECOMMENDATIONS_V2,
-  create_task_v2,
-  get_task_v2,
-  get_db_v2,
+  TEMPLATE_RECOMMENDATIONS,
+  create_task,
+  get_task,
+  get_db,
   get_template_recommendation,
   has_open_blockers,
   is_valid_task_type,
-  list_tasks_by_statuses_v2,
-  list_tasks_v2,
+  list_tasks_by_statuses,
+  list_tasks,
   list_template_recommendations,
   resolve_template_type,
-  update_task_v2,
+  update_task,
   validate_status_transition,
   validate_task_input,
-  type CreateTaskInputV2,
-  type TaskStatusV2,
-  type TaskTypeV2,
-  type TaskV2
-} from './db.v2'
+  type CreateTaskInput,
+  type TaskStatus,
+  type TaskType,
+  type Task
+} from './db'
 
-const TASK_NOT_FOUND_SUGGESTIONS_V2 = [
-  'Use arbeit_v2_query({ query: "tasks" }) to list valid task_ids.',
+const TASK_NOT_FOUND_SUGGESTIONS = [
+  'Use arbeit_query({ query: "tasks" }) to list valid task_ids.',
   'If you only have a title, list tasks and match by title.'
 ]
 
@@ -48,8 +48,8 @@ function with_arbeit_error_handling<T>(fn: () => Promise<T>): Promise<string> {
     })
 }
 
-function recommendations_for_template(template: keyof typeof TEMPLATE_RECOMMENDATIONS_V2) {
-  return { plan_template: TEMPLATE_RECOMMENDATIONS_V2[template].plan_template }
+function recommendations_for_template(template: keyof typeof TEMPLATE_RECOMMENDATIONS) {
+  return { plan_template: TEMPLATE_RECOMMENDATIONS[template].plan_template }
 }
 
 function recommendations_for_missing(missing: string[]) {
@@ -57,7 +57,7 @@ function recommendations_for_missing(missing: string[]) {
 }
 
 function merge_recommendations(
-  template?: keyof typeof TEMPLATE_RECOMMENDATIONS_V2,
+  template?: keyof typeof TEMPLATE_RECOMMENDATIONS,
   missing?: string[]
 ): { plan_template?: string; missing_fields?: string[] } | undefined {
   if (!template && (!missing || missing.length === 0)) return undefined
@@ -67,7 +67,7 @@ function merge_recommendations(
   }
 }
 
-const GUIDE_MARKDOWN_V2 = `# Arbeit Quickstart (Agent Guide)
+const GUIDE_MARKDOWN = `# Arbeit Quickstart (Agent Guide)
 
 ## 1) Read the user prompt
 - Restate the goal in 1-2 sentences.
@@ -90,26 +90,26 @@ const GUIDE_MARKDOWN_V2 = `# Arbeit Quickstart (Agent Guide)
 - Update status and fields as decisions change.
 `
 
-export function arbeit_v2_init({ directory }: { directory: string }) {
+export function arbeit_init({ directory }: { directory: string }) {
   return tool({
-    description: 'Initialize the v2 arbeit database.',
+    description: 'Initialize the arbeit database.',
     args: {},
     async execute() {
       return with_arbeit_error_handling(async () => {
-        await init_project_v2({ directory })
+        await init_project({ directory })
         return arbeit_success({
           initialized: true,
-          path: `${directory}/.arbeit/arbeit_v2.db`,
-          guide_markdown: GUIDE_MARKDOWN_V2
+          path: `${directory}/.arbeit/arbeit.db`,
+          guide_markdown: GUIDE_MARKDOWN
         })
       })
     }
   })
 }
 
-export function arbeit_v2_task_create({ directory }: { directory: string }) {
+export function arbeit_task_create({ directory }: { directory: string }) {
   return tool({
-    description: 'Create a v2 task (supports templates for discovery).',
+    description: 'Create a task (supports templates for discovery).',
     args: {
       title: tool.schema.string().min(1).describe('Short task label.'),
       type: tool.schema.enum(['epic', 'feature', 'bug', 'investigation', 'chore']).optional().describe('Task type.'),
@@ -126,7 +126,7 @@ export function arbeit_v2_task_create({ directory }: { directory: string }) {
     },
     async execute(args) {
       return with_arbeit_error_handling(async () => {
-        const db = await get_db_v2(directory)
+        const db = await get_db(directory)
         const templateType = resolve_template_type(args.template)
 
         if (args.template && !templateType) {
@@ -146,7 +146,7 @@ export function arbeit_v2_task_create({ directory }: { directory: string }) {
           throw new ArbeitError('INVALID_TEMPLATE', 'Template does not match provided type')
         }
 
-        const input: CreateTaskInputV2 = {
+        const input: CreateTaskInput = {
           title: args.title,
           type,
           status: args.status,
@@ -157,9 +157,9 @@ export function arbeit_v2_task_create({ directory }: { directory: string }) {
           blocked_by: args.blocked_by ?? []
         }
 
-        const task = await create_task_v2(db, input)
+        const task = await create_task(db, input)
         const missing = validate_task_input({ ...input, title: args.title })
-        const recommendations = merge_recommendations(args.template as keyof typeof TEMPLATE_RECOMMENDATIONS_V2, missing)
+        const recommendations = merge_recommendations(args.template as keyof typeof TEMPLATE_RECOMMENDATIONS, missing)
 
         return arbeit_success({ task, recommendations })
       })
@@ -167,27 +167,27 @@ export function arbeit_v2_task_create({ directory }: { directory: string }) {
   })
 }
 
-export function arbeit_v2_task_get({ directory }: { directory: string }) {
+export function arbeit_task_get({ directory }: { directory: string }) {
   return tool({
-    description: 'Fetch a v2 task by ID.',
+    description: 'Fetch a task by ID.',
     args: {
       task_id: tool.schema.string().describe('Task ID.')
     },
     async execute(args) {
       return with_arbeit_error_handling(async () => {
-        const db = await get_db_v2(directory)
-        const task = await get_task_v2(db, args.task_id)
+        const db = await get_db(directory)
+        const task = await get_task(db, args.task_id)
         if (!task) {
-          throw new ArbeitError('TASK_NOT_FOUND', 'Task not found', TASK_NOT_FOUND_SUGGESTIONS_V2)
+          throw new ArbeitError('TASK_NOT_FOUND', 'Task not found', TASK_NOT_FOUND_SUGGESTIONS)
         }
 
-        const parent = task.parent_id ? await get_task_v2(db, task.parent_id) : null
-        const children = await list_tasks_v2(db, { parent_id: task.id })
+        const parent = task.parent_id ? await get_task(db, task.parent_id) : null
+        const children = await list_tasks(db, { parent_id: task.id })
         const blockers = task.blocked_by.length > 0
-          ? await Promise.all(task.blocked_by.map((id) => get_task_v2(db, id)))
+          ? await Promise.all(task.blocked_by.map((id) => get_task(db, id)))
           : []
 
-        const uniqueBlocking = new Map<string, TaskV2>()
+        const uniqueBlocking = new Map<string, Task>()
         for (const item of blockers) {
           if (!item) continue
           if (!uniqueBlocking.has(item.id)) {
@@ -206,9 +206,9 @@ export function arbeit_v2_task_get({ directory }: { directory: string }) {
   })
 }
 
-export function arbeit_v2_task_update({ directory }: { directory: string }) {
+export function arbeit_task_update({ directory }: { directory: string }) {
   return tool({
-    description: 'Update a v2 task.',
+    description: 'Update a task.',
     args: {
       task_id: tool.schema.string().describe('Task ID.'),
       title: tool.schema.string().optional().describe('Updated title.'),
@@ -222,14 +222,14 @@ export function arbeit_v2_task_update({ directory }: { directory: string }) {
     },
     async execute(args) {
       return with_arbeit_error_handling(async () => {
-        const db = await get_db_v2(directory)
-        const task = await get_task_v2(db, args.task_id)
+        const db = await get_db(directory)
+        const task = await get_task(db, args.task_id)
         if (!task) {
-          throw new ArbeitError('TASK_NOT_FOUND', 'Task not found', TASK_NOT_FOUND_SUGGESTIONS_V2)
+          throw new ArbeitError('TASK_NOT_FOUND', 'Task not found', TASK_NOT_FOUND_SUGGESTIONS)
         }
 
         if (args.status) {
-          const candidate: TaskV2 = {
+          const candidate: Task = {
             ...task,
             title: args.title ?? task.title,
             type: args.type ?? task.type,
@@ -254,12 +254,12 @@ export function arbeit_v2_task_update({ directory }: { directory: string }) {
           if (missingStatus.length > 0) {
             return arbeit_success({
               task,
-              recommendations: { missing_fields: missingStatus, plan_template: TEMPLATE_RECOMMENDATIONS_V2[candidate.type].plan_template }
+              recommendations: { missing_fields: missingStatus, plan_template: TEMPLATE_RECOMMENDATIONS[candidate.type].plan_template }
             })
           }
         }
 
-        const updatedTask = await update_task_v2(db, args.task_id, {
+        const updatedTask = await update_task(db, args.task_id, {
           title: args.title,
           type: args.type,
           status: args.status,
@@ -288,34 +288,34 @@ export function arbeit_v2_task_update({ directory }: { directory: string }) {
   })
 }
 
-export function arbeit_v2_task_delete({ directory }: { directory: string }) {
+export function arbeit_task_delete({ directory }: { directory: string }) {
   return tool({
-    description: 'Soft delete a v2 task.',
+    description: 'Soft delete a task.',
     args: {
       task_id: tool.schema.string().describe('Task ID.')
     },
     async execute(args) {
       return with_arbeit_error_handling(async () => {
-        const db = await get_db_v2(directory)
-        const task = await get_task_v2(db, args.task_id)
+        const db = await get_db(directory)
+        const task = await get_task(db, args.task_id)
         if (!task) {
-          throw new ArbeitError('TASK_NOT_FOUND', 'Task not found', TASK_NOT_FOUND_SUGGESTIONS_V2)
+          throw new ArbeitError('TASK_NOT_FOUND', 'Task not found', TASK_NOT_FOUND_SUGGESTIONS)
         }
 
         if (task.status === 'deleted') {
           return arbeit_success({ deleted: true })
         }
 
-        const deleted = await update_task_v2(db, args.task_id, { status: 'deleted' as TaskStatusV2 })
+        const deleted = await update_task(db, args.task_id, { status: 'deleted' as TaskStatus })
         return arbeit_success({ deleted: Boolean(deleted) })
       })
     }
   })
 }
 
-export function arbeit_v2_query({ directory }: { directory: string }) {
+export function arbeit_query({ directory }: { directory: string }) {
   return tool({
-    description: 'List and graph queries for v2 tasks.',
+    description: 'List and graph queries for tasks.',
     args: {
       query: tool.schema.enum(['tasks', 'active_tasks', 'children_of', 'descendants_of', 'ancestors_of', 'templates']).describe('Named query to run.'),
       params: tool.schema
@@ -328,19 +328,19 @@ export function arbeit_v2_query({ directory }: { directory: string }) {
     },
     async execute(args) {
       return with_arbeit_error_handling(async () => {
-        const db = await get_db_v2(directory)
+        const db = await get_db(directory)
         const params = args.params ?? {}
 
         switch (args.query) {
           case 'tasks': {
-            const tasks = await list_tasks_v2(db, {
-              status: params.status as TaskStatusV2 | undefined,
+            const tasks = await list_tasks(db, {
+              status: params.status as TaskStatus | undefined,
               parent_id: params.parent_id as string | null | undefined
             })
             return arbeit_success({ tasks })
           }
           case 'active_tasks': {
-            const tasks = await list_tasks_by_statuses_v2(db, {
+            const tasks = await list_tasks_by_statuses(db, {
               statuses: ['open', 'in_progress'],
               parent_id: params.parent_id as string | null | undefined
             })
@@ -348,24 +348,24 @@ export function arbeit_v2_query({ directory }: { directory: string }) {
           }
           case 'children_of': {
             if (!params.task_id) {
-              throw new ArbeitError('TASK_NOT_FOUND', 'task_id is required', TASK_NOT_FOUND_SUGGESTIONS_V2)
+              throw new ArbeitError('TASK_NOT_FOUND', 'task_id is required', TASK_NOT_FOUND_SUGGESTIONS)
             }
-            const tasks = await list_tasks_v2(db, { parent_id: params.task_id })
+            const tasks = await list_tasks(db, { parent_id: params.task_id })
             return arbeit_success({ tasks })
           }
           case 'descendants_of': {
             if (!params.task_id) {
-              throw new ArbeitError('TASK_NOT_FOUND', 'task_id is required', TASK_NOT_FOUND_SUGGESTIONS_V2)
+              throw new ArbeitError('TASK_NOT_FOUND', 'task_id is required', TASK_NOT_FOUND_SUGGESTIONS)
             }
-            const tasks = await list_tasks_v2(db)
+            const tasks = await list_tasks(db)
             const descendants = collect_descendants(tasks, params.task_id)
             return arbeit_success({ task_ids: descendants })
           }
           case 'ancestors_of': {
             if (!params.task_id) {
-              throw new ArbeitError('TASK_NOT_FOUND', 'task_id is required', TASK_NOT_FOUND_SUGGESTIONS_V2)
+              throw new ArbeitError('TASK_NOT_FOUND', 'task_id is required', TASK_NOT_FOUND_SUGGESTIONS)
             }
-            const tasks = await list_tasks_v2(db)
+            const tasks = await list_tasks(db)
             const ancestors = collect_ancestors(tasks, params.task_id)
             return arbeit_success({ task_ids: ancestors })
           }
@@ -378,8 +378,8 @@ export function arbeit_v2_query({ directory }: { directory: string }) {
   })
 }
 
-function collect_descendants(tasks: TaskV2[], parent_id: string): string[] {
-  const byParent = new Map<string, TaskV2[]>()
+function collect_descendants(tasks: Task[], parent_id: string): string[] {
+  const byParent = new Map<string, Task[]>()
   for (const task of tasks) {
     if (!task.parent_id) continue
     const list = byParent.get(task.parent_id) ?? []
@@ -398,7 +398,7 @@ function collect_descendants(tasks: TaskV2[], parent_id: string): string[] {
   return result
 }
 
-function collect_ancestors(tasks: TaskV2[], task_id: string): string[] {
+function collect_ancestors(tasks: Task[], task_id: string): string[] {
   const byId = new Map(tasks.map((task) => [task.id, task]))
   const result: string[] = []
   let current = byId.get(task_id)

@@ -1,8 +1,8 @@
-# Arbeit v2 - Simplified Agent Task Model
+# Arbeit - Simplified Agent Task Model
 
 ## 1. Overview
 
-Arbeit v2 simplifies the system to a single, richer task entity. The goal is to reduce meta-planning and force actionable technical detail at the task level while keeping the interface minimal.
+Arbeit simplifies the system to a single, richer task entity. The goal is to reduce meta-planning and force actionable technical detail at the task level while keeping the interface minimal.
 
 ### Design Goals
 - **Concrete detail by default**: implementation-like tasks must include a plan before execution.
