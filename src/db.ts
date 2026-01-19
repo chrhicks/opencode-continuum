@@ -108,6 +108,8 @@ interface TaskRow {
   updated_at: string
 }
 
+const dbFilePath = (directory: string) => `${directory}/.arbeit/arbeit.db`
+
 const dbCache = new Map<string, Database>()
 
 function parse_blocked_by(value: string | null): string[] {
@@ -154,15 +156,15 @@ export async function get_db(directory: string): Promise<Database> {
     return dbCache.get(directory)!
   }
 
-  const db = new Database(`${directory}/.arbeit/arbeit.db`)
+  const db = new Database(dbFilePath(directory))
   dbCache.set(directory, db)
   return db
 }
 
 export async function init_db(directory: string): Promise<void> {
-  const db = new Database(`${directory}/.arbeit/arbeit.db`)
+  const db = new Database(dbFilePath(directory))
   const migrationSQL = await getMigrationSQL()
-  db.exec(migrationSQL)
+  db.run(migrationSQL.trim())
   db.close()
 }
 
@@ -361,6 +363,8 @@ export async function update_task(db: Database, task_id: string, input: UpdateTa
     }
   }
 
+  // null values allowed here to remove fields
+  
   if (input.title !== undefined) {
     updates.push('title = ?')
     params.push(input.title)

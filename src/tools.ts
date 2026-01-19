@@ -6,7 +6,6 @@ import {
   create_task,
   get_task,
   get_db,
-  get_template_recommendation,
   has_open_blockers,
   is_valid_task_type,
   list_tasks_by_statuses,
@@ -18,7 +17,6 @@ import {
   validate_task_input,
   type CreateTaskInput,
   type TaskStatus,
-  type TaskType,
   type Task
 } from './db'
 
@@ -50,10 +48,6 @@ function with_arbeit_error_handling<T>(fn: () => Promise<T>): Promise<string> {
 
 function recommendations_for_template(template: keyof typeof TEMPLATE_RECOMMENDATIONS) {
   return { plan_template: TEMPLATE_RECOMMENDATIONS[template].plan_template }
-}
-
-function recommendations_for_missing(missing: string[]) {
-  return missing.length > 0 ? { missing_fields: missing } : undefined
 }
 
 function merge_recommendations(
