@@ -1,22 +1,22 @@
 import type { Plugin } from '@opencode-ai/plugin'
 import {
-  arbeit_init,
-  arbeit_query,
-  arbeit_task_create,
-  arbeit_task_delete,
-  arbeit_task_get,
-  arbeit_task_update
+  continuum_init,
+  continuum_query,
+  continuum_task_create,
+  continuum_task_delete,
+  continuum_task_get,
+  continuum_task_update
 } from './tools'
 
 export const plugin: Plugin = async ({ project, client, $, directory, worktree }) => {
   return {
     tool: {
-      arbeit_init: arbeit_init({ directory }),
-      arbeit_task_create: arbeit_task_create({ directory }),
-      arbeit_task_get: arbeit_task_get({ directory }),
-      arbeit_task_update: arbeit_task_update({ directory }),
-      arbeit_task_delete: arbeit_task_delete({ directory }),
-      arbeit_query: arbeit_query({ directory })
+      continuum_init: continuum_init({ directory }),
+      continuum_task_create: continuum_task_create({ directory }),
+      continuum_task_get: continuum_task_get({ directory }),
+      continuum_task_update: continuum_task_update({ directory }),
+      continuum_task_delete: continuum_task_delete({ directory }),
+      continuum_query: continuum_query({ directory })
     }
   }
 }

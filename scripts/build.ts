@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * Build script for arbeit OpenCode plugin
+ * Build script for continuum OpenCode plugin
  * 
  * 1. Runs tests (fails build if tests fail)
- * 2. Bundles src/index.ts to .opencode/plugin/arbeit.ts
+ * 2. Bundles src/index.ts to .opencode/plugins/continuum.ts
  *    - Inlines SQL migrations as strings via virtual module replacement
  *    - Externalizes @opencode-ai/plugin (provided by OpenCode runtime)
  */
@@ -12,8 +12,8 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 const ENTRY_POINT = 'src/plugin.ts'
-const OUTPUT_DIR = '.opencode/plugin'
-const OUTPUT_FILE = `${OUTPUT_DIR}/arbeit.ts`
+const OUTPUT_DIR = '.opencode/plugins'
+const OUTPUT_FILE = `${OUTPUT_DIR}/continuum.ts`
 const MIGRATION_SQL = 'src/migrations/001_initial.sql'
 
 // Bun plugin to replace migration loaders with inlined SQL
@@ -63,7 +63,7 @@ async function bundle(): Promise<boolean> {
   const result = await Bun.build({
     entrypoints: [ENTRY_POINT],
     outdir: OUTPUT_DIR,
-    naming: 'arbeit.ts',
+    naming: 'continuum.ts',
     target: 'bun',
     format: 'esm',
     plugins: [createMigrationPlugin()],

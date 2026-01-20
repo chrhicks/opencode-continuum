@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os'
 import { init_project } from './util'
 import { get_db, type Task } from './db'
 import {
-  arbeit_init,
-  arbeit_query,
-  arbeit_task_create,
-  arbeit_task_get,
-  arbeit_task_update
+  continuum_init,
+  continuum_query,
+  continuum_task_create,
+  continuum_task_get,
+  continuum_task_update
 } from './tools'
 
 type ArbeitResponse<T> = {
@@ -23,7 +23,7 @@ type ArbeitResponse<T> = {
 }
 
 async function createTempDir(): Promise<string> {
-  return await mkdtemp(join(tmpdir(), 'arbeit-tools-'))
+  return await mkdtemp(join(tmpdir(), 'continuum-tools-'))
 }
 
 async function runTool<T>(toolInstance: any, args: any, context?: any): Promise<ArbeitResponse<T>> {
@@ -54,14 +54,14 @@ describe('tools', () => {
   })
 
   test('init creates db file', async () => {
-    const initTool = arbeit_init({ directory })
+    const initTool = continuum_init({ directory })
     const response = await runTool<{ initialized: boolean; path: string }>(initTool, {})
     expect(response.success).toBe(true)
     expect(response.data?.initialized).toBe(true)
   })
 
   test('task_create with template returns recommendations', async () => {
-    const createTool = arbeit_task_create({ directory })
+    const createTool = continuum_task_create({ directory })
     const response = await runTool<{ task: Task; recommendations?: { plan_template?: string } }>(createTool, {
       title: 'Login bug',
       template: 'bug',
@@ -74,8 +74,8 @@ describe('tools', () => {
   })
 
   test('task_update returns recommendations for missing fields', async () => {
-    const createTool = arbeit_task_create({ directory })
-    const updateTool = arbeit_task_update({ directory })
+    const createTool = continuum_task_create({ directory })
+    const updateTool = continuum_task_update({ directory })
 
     const created = await runTool<{ task: Task }>(createTool, {
       title: 'Feature task',
@@ -93,9 +93,9 @@ describe('tools', () => {
   })
 
   test('task_update blocks completion when blockers are open', async () => {
-    const createTool = arbeit_task_create({ directory })
-    const updateTool = arbeit_task_update({ directory })
-    const getTool = arbeit_task_get({ directory })
+    const createTool = continuum_task_create({ directory })
+    const updateTool = continuum_task_update({ directory })
+    const getTool = continuum_task_get({ directory })
 
     const blocker = await runTool<{ task: Task }>(createTool, {
       title: 'Blocker',
@@ -127,9 +127,9 @@ describe('tools', () => {
   })
 
   test('task_update does not persist in_progress without plan', async () => {
-    const createTool = arbeit_task_create({ directory })
-    const updateTool = arbeit_task_update({ directory })
-    const getTool = arbeit_task_get({ directory })
+    const createTool = continuum_task_create({ directory })
+    const updateTool = continuum_task_update({ directory })
+    const getTool = continuum_task_get({ directory })
 
     const created = await runTool<{ task: Task }>(createTool, {
       title: 'Missing plan',
@@ -152,9 +152,9 @@ describe('tools', () => {
   })
 
   test('task_update does not persist completed without plan', async () => {
-    const createTool = arbeit_task_create({ directory })
-    const updateTool = arbeit_task_update({ directory })
-    const getTool = arbeit_task_get({ directory })
+    const createTool = continuum_task_create({ directory })
+    const updateTool = continuum_task_update({ directory })
+    const getTool = continuum_task_get({ directory })
 
     const created = await runTool<{ task: Task }>(createTool, {
       title: 'Missing plan completed',
@@ -177,8 +177,8 @@ describe('tools', () => {
   })
 
   test('task_update rejects self blockers', async () => {
-    const createTool = arbeit_task_create({ directory })
-    const updateTool = arbeit_task_update({ directory })
+    const createTool = continuum_task_create({ directory })
+    const updateTool = continuum_task_update({ directory })
 
     const created = await runTool<{ task: Task }>(createTool, {
       title: 'Self blocked',
@@ -197,8 +197,8 @@ describe('tools', () => {
   })
 
   test('task_update rejects duplicate blockers', async () => {
-    const createTool = arbeit_task_create({ directory })
-    const updateTool = arbeit_task_update({ directory })
+    const createTool = continuum_task_create({ directory })
+    const updateTool = continuum_task_update({ directory })
 
     const blocker = await runTool<{ task: Task }>(createTool, {
       title: 'Blocker dup',
@@ -225,8 +225,8 @@ describe('tools', () => {
   })
 
   test('task_get returns children and blockers', async () => {
-    const createTool = arbeit_task_create({ directory })
-    const getTool = arbeit_task_get({ directory })
+    const createTool = continuum_task_create({ directory })
+    const getTool = continuum_task_get({ directory })
 
     const parent = await runTool<{ task: Task }>(createTool, {
       title: 'Epic',
@@ -275,7 +275,7 @@ describe('tools', () => {
   })
 
   test('query templates returns template list', async () => {
-    const queryTool = arbeit_query({ directory })
+    const queryTool = continuum_query({ directory })
     const response = await runTool<{ templates: Array<{ name: string; plan_template: string }> }>(queryTool, {
       query: 'templates'
     })

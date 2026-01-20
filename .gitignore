@@ -16,7 +16,7 @@ logs
 report.[0-9]*.json
 
 # local tooling
-.arbeit
+.continuum
 .opencode
 .submodules
 

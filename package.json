@@ -1,5 +1,5 @@
 {
-  "name": "arbeit",
+  "name": "opencode-continuum",
   "module": "index.ts",
   "type": "module",
   "private": true,

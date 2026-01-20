@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Dev script for arbeit OpenCode plugin
+ * Dev script for continuum OpenCode plugin
  * 
  * Watches src/ for changes and auto-rebuilds (without running tests for speed).
  * Use `bun run build` for a full test + build.

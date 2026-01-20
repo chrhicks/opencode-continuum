@@ -16,8 +16,8 @@ export async function dir_exists(directory: string) {
 }
 
 export async function init_status({ directory }: { directory: string }): Promise<InitStatus> {
-  const pluginDirExists = await dir_exists(`${directory}/.arbeit`)
-  const dbFile = Bun.file(`${directory}/.arbeit/arbeit.db`)
+  const pluginDirExists = await dir_exists(`${directory}/.continuum`)
+  const dbFile = Bun.file(`${directory}/.continuum/continuum.db`)
   const dbFileExists = await dbFile.exists()
 
   return {
@@ -30,7 +30,7 @@ export async function init_project({ directory }: { directory: string }) {
   const { pluginDirExists, dbFileExists } = await init_status({ directory })
 
   if (!pluginDirExists) {
-    await mkdir(`${directory}/.arbeit`, { recursive: true })
+    await mkdir(`${directory}/.continuum`, { recursive: true })
   }
   if (!dbFileExists) {
     await init_db(directory)

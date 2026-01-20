@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite'
 import { randomId } from './db.utils'
 import { init_status } from './util'
-import { ArbeitError } from './error'
+import { ContinuumError } from './error'
 import { getMigrationSQL } from './migration'
 
 export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled'
@@ -108,7 +108,7 @@ interface TaskRow {
   updated_at: string
 }
 
-const dbFilePath = (directory: string) => `${directory}/.arbeit/arbeit.db`
+const dbFilePath = (directory: string) => `${directory}/.continuum/continuum.db`
 
 const dbCache = new Map<string, Database>()
 
@@ -142,13 +142,13 @@ export async function get_db(directory: string): Promise<Database> {
   const status = await init_status({ directory })
 
   if (!status.pluginDirExists) {
-    throw new ArbeitError('NOT_INITIALIZED', 'Arbeit is not initialized in this directory', [
-      'Run `arbeit_init()` to initialize arbeit in this directory'
+    throw new ContinuumError('NOT_INITIALIZED', 'Continuum is not initialized in this directory', [
+      'Run `continuum_init()` to initialize continuum in this directory'
     ])
   }
   if (!status.dbFileExists) {
-    throw new ArbeitError('NOT_INITIALIZED', 'Arbeit database file does not exist', [
-      'Run `arbeit_init()` to initialize arbeit in this directory'
+    throw new ContinuumError('NOT_INITIALIZED', 'Continuum database file does not exist', [
+      'Run `continuum_init()` to initialize continuum in this directory'
     ])
   }
 
@@ -253,12 +253,12 @@ function validate_blocker_list(task_id: string, blockers: string[]) {
   const seen = new Set<string>()
   for (const blocker of blockers) {
     if (blocker === task_id) {
-      throw new ArbeitError('INVALID_BLOCKER', 'Task cannot block itself', [
+      throw new ContinuumError('INVALID_BLOCKER', 'Task cannot block itself', [
         'Remove the task id from blocked_by.'
       ])
     }
     if (seen.has(blocker)) {
-      throw new ArbeitError('DUPLICATE_BLOCKERS', 'blocked_by contains duplicate task ids', [
+      throw new ContinuumError('DUPLICATE_BLOCKERS', 'blocked_by contains duplicate task ids', [
         'Remove duplicate ids from blocked_by.'
       ])
     }
@@ -291,7 +291,7 @@ export async function create_task(db: Database, input: CreateTaskInput): Promise
   if (input.parent_id) {
     const parentExists = await task_exists(db, input.parent_id)
     if (!parentExists) {
-      throw new ArbeitError('PARENT_NOT_FOUND', 'Parent task not found', [
+      throw new ContinuumError('PARENT_NOT_FOUND', 'Parent task not found', [
         'Verify parent_id and try again.'
       ])
     }
@@ -299,7 +299,7 @@ export async function create_task(db: Database, input: CreateTaskInput): Promise
 
   const missingBlockers = await validate_blockers(db, blocked_by)
   if (missingBlockers.length > 0) {
-    throw new ArbeitError('BLOCKER_NOT_FOUND', `Blocking tasks not found: ${missingBlockers.join(', ')}`, [
+    throw new ContinuumError('BLOCKER_NOT_FOUND', `Blocking tasks not found: ${missingBlockers.join(', ')}`, [
       `Missing blocked_by IDs: ${missingBlockers.join(', ')}`
     ])
   }
@@ -323,7 +323,7 @@ export async function create_task(db: Database, input: CreateTaskInput): Promise
   )
 
   if (result.changes === 0) {
-    throw new ArbeitError('TASK_CREATE_FAILED', 'Failed to create task')
+    throw new ContinuumError('TASK_CREATE_FAILED', 'Failed to create task')
   }
 
   const row = db.query<TaskRow, [string]>(
@@ -332,7 +332,7 @@ export async function create_task(db: Database, input: CreateTaskInput): Promise
   ).get(id)
 
   if (!row) {
-    throw new ArbeitError('TASK_NOT_FOUND', 'Task not found after create')
+    throw new ContinuumError('TASK_NOT_FOUND', 'Task not found after create')
   }
 
   return row_to_task(row)
@@ -346,7 +346,7 @@ export async function update_task(db: Database, task_id: string, input: UpdateTa
     if (input.parent_id) {
       const parentExists = await task_exists(db, input.parent_id)
       if (!parentExists) {
-        throw new ArbeitError('PARENT_NOT_FOUND', 'Parent task not found', [
+        throw new ContinuumError('PARENT_NOT_FOUND', 'Parent task not found', [
           'Verify parent_id and try again.'
         ])
       }
@@ -357,7 +357,7 @@ export async function update_task(db: Database, task_id: string, input: UpdateTa
     validate_blocker_list(task_id, input.blocked_by ?? [])
     const missingBlockers = await validate_blockers(db, input.blocked_by ?? [])
     if (missingBlockers.length > 0) {
-      throw new ArbeitError('BLOCKER_NOT_FOUND', `Blocking tasks not found: ${missingBlockers.join(', ')}`, [
+      throw new ContinuumError('BLOCKER_NOT_FOUND', `Blocking tasks not found: ${missingBlockers.join(', ')}`, [
         `Missing blocked_by IDs: ${missingBlockers.join(', ')}`
       ])
     }
@@ -399,7 +399,7 @@ export async function update_task(db: Database, task_id: string, input: UpdateTa
   }
 
   if (updates.length === 0) {
-    throw new ArbeitError('NO_CHANGES_MADE', 'No fields to update')
+    throw new ContinuumError('NO_CHANGES_MADE', 'No fields to update')
   }
 
   updates.push('updated_at = ?')
@@ -412,7 +412,7 @@ export async function update_task(db: Database, task_id: string, input: UpdateTa
   )
 
   if (result.changes === 0) {
-    throw new ArbeitError('TASK_UPDATE_FAILED', 'Failed to update task')
+    throw new ContinuumError('TASK_UPDATE_FAILED', 'Failed to update task')
   }
 
   const row = db.query<TaskRow, [string]>(
@@ -421,7 +421,7 @@ export async function update_task(db: Database, task_id: string, input: UpdateTa
   ).get(task_id)
 
   if (!row) {
-    throw new ArbeitError('TASK_NOT_FOUND', 'Task not found after update')
+    throw new ContinuumError('TASK_NOT_FOUND', 'Task not found after update')
   }
 
   return row_to_task(row)

@@ -1,4 +1,4 @@
-export type ArbeitErrorCode =
+export type ContinuumErrorCode =
   | "NOT_INITIALIZED"
   | "TASK_NOT_FOUND"
   | "INVALID_STATUS"
@@ -27,10 +27,10 @@ export type ArbeitErrorCode =
   | "CONTEXT_CREATE_FAILED"
   | "CONTEXT_SUPERSEDE_FAILED"
 
-  export class ArbeitError extends Error {
-  code: ArbeitErrorCode
+export class ContinuumError extends Error {
+  code: ContinuumErrorCode
   suggestions?: string[]
-  constructor(code: ArbeitErrorCode, message: string, suggestions?: string[], options?: ErrorOptions) {
+  constructor(code: ContinuumErrorCode, message: string, suggestions?: string[], options?: ErrorOptions) {
     super(message, options)
     this.code = code
     this.suggestions = suggestions
@@ -38,6 +38,6 @@ export type ArbeitErrorCode =
   }
 }
 
-export function isArbeitError(err: unknown): err is ArbeitError {
-  return err instanceof ArbeitError
+export function isContinuumError(err: unknown): err is ContinuumError {
+  return err instanceof ContinuumError
 }

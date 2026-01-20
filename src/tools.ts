@@ -1,5 +1,5 @@
 import { tool } from '@opencode-ai/plugin'
-import { ArbeitError, isArbeitError } from './error'
+import { ContinuumError, isContinuumError } from './error'
 import { init_project } from './util'
 import {
   TEMPLATE_RECOMMENDATIONS,
@@ -21,28 +21,28 @@ import {
 } from './db'
 
 const TASK_NOT_FOUND_SUGGESTIONS = [
-  'Use arbeit_query({ query: "tasks" }) to list valid task_ids.',
+  'Use continuum_query({ query: "tasks" }) to list valid task_ids.',
   'If you only have a title, list tasks and match by title.'
 ]
 
 
-function arbeit_success<T>(data: T) {
+function continuum_success<T>(data: T) {
   return { success: true, data }
 }
 
-function arbeit_error<T>(error: { code: string; message: string; suggestions?: string[] }) {
+function continuum_error<T>(error: { code: string; message: string; suggestions?: string[] }) {
   return { success: false, error }
 }
 
-function with_arbeit_error_handling<T>(fn: () => Promise<T>): Promise<string> {
+function with_continuum_error_handling<T>(fn: () => Promise<T>): Promise<string> {
   return fn()
     .then((data) => JSON.stringify(data))
     .catch((err) => {
-      if (isArbeitError(err)) {
-        return JSON.stringify(arbeit_error({ code: err.code, message: err.message, suggestions: err.suggestions }))
+      if (isContinuumError(err)) {
+        return JSON.stringify(continuum_error({ code: err.code, message: err.message, suggestions: err.suggestions }))
       }
       const error = err as Error
-      return JSON.stringify(arbeit_error({ code: 'UNKNOWN_ERROR', message: error.message }))
+      return JSON.stringify(continuum_error({ code: 'UNKNOWN_ERROR', message: error.message }))
     })
 }
 
@@ -61,7 +61,7 @@ function merge_recommendations(
   }
 }
 
-const GUIDE_MARKDOWN = `# Arbeit Quickstart (Agent Guide)
+const GUIDE_MARKDOWN = `# Continuum Quickstart (Agent Guide)
 
 ## 1) Read the user prompt
 - Restate the goal in 1-2 sentences.
@@ -84,16 +84,16 @@ const GUIDE_MARKDOWN = `# Arbeit Quickstart (Agent Guide)
 - Update status and fields as decisions change.
 `
 
-export function arbeit_init({ directory }: { directory: string }) {
+export function continuum_init({ directory }: { directory: string }) {
   return tool({
-    description: 'Initialize the arbeit database.',
+    description: 'Initialize the continuum database.',
     args: {},
     async execute() {
-      return with_arbeit_error_handling(async () => {
+      return with_continuum_error_handling(async () => {
         await init_project({ directory })
-        return arbeit_success({
+        return continuum_success({
           initialized: true,
-          path: `${directory}/.arbeit/arbeit.db`,
+          path: `${directory}/.continuum/continuum.db`,
           guide_markdown: GUIDE_MARKDOWN
         })
       })
@@ -101,7 +101,7 @@ export function arbeit_init({ directory }: { directory: string }) {
   })
 }
 
-export function arbeit_task_create({ directory }: { directory: string }) {
+export function continuum_task_create({ directory }: { directory: string }) {
   return tool({
     description: 'Create a task (supports templates for discovery).',
     args: {
@@ -119,25 +119,25 @@ export function arbeit_task_create({ directory }: { directory: string }) {
       status: tool.schema.enum(['open', 'in_progress', 'completed', 'cancelled']).optional().describe('Initial status.')
     },
     async execute(args) {
-      return with_arbeit_error_handling(async () => {
+      return with_continuum_error_handling(async () => {
         const db = await get_db(directory)
         const templateType = resolve_template_type(args.template)
 
         if (args.template && !templateType) {
-          throw new ArbeitError('INVALID_TEMPLATE', 'Template not recognized')
+          throw new ContinuumError('INVALID_TEMPLATE', 'Template not recognized')
         }
 
         const type = args.type ?? templateType
         if (!type) {
-          throw new ArbeitError('INVALID_TYPE', 'Task type is required when no template is provided')
+          throw new ContinuumError('INVALID_TYPE', 'Task type is required when no template is provided')
         }
 
         if (!is_valid_task_type(type)) {
-          throw new ArbeitError('INVALID_TYPE', 'Task type not recognized')
+          throw new ContinuumError('INVALID_TYPE', 'Task type not recognized')
         }
 
         if (args.type && templateType && args.type !== templateType) {
-          throw new ArbeitError('INVALID_TEMPLATE', 'Template does not match provided type')
+          throw new ContinuumError('INVALID_TEMPLATE', 'Template does not match provided type')
         }
 
         const input: CreateTaskInput = {
@@ -155,24 +155,24 @@ export function arbeit_task_create({ directory }: { directory: string }) {
         const missing = validate_task_input({ ...input, title: args.title })
         const recommendations = merge_recommendations(args.template as keyof typeof TEMPLATE_RECOMMENDATIONS, missing)
 
-        return arbeit_success({ task, recommendations })
+        return continuum_success({ task, recommendations })
       })
     }
   })
 }
 
-export function arbeit_task_get({ directory }: { directory: string }) {
+export function continuum_task_get({ directory }: { directory: string }) {
   return tool({
     description: 'Fetch a task by ID.',
     args: {
       task_id: tool.schema.string().describe('Task ID.')
     },
     async execute(args) {
-      return with_arbeit_error_handling(async () => {
+      return with_continuum_error_handling(async () => {
         const db = await get_db(directory)
         const task = await get_task(db, args.task_id)
         if (!task) {
-          throw new ArbeitError('TASK_NOT_FOUND', 'Task not found', TASK_NOT_FOUND_SUGGESTIONS)
+          throw new ContinuumError('TASK_NOT_FOUND', 'Task not found', TASK_NOT_FOUND_SUGGESTIONS)
         }
 
         const parent = task.parent_id ? await get_task(db, task.parent_id) : null
@@ -189,7 +189,7 @@ export function arbeit_task_get({ directory }: { directory: string }) {
           }
         }
 
-        return arbeit_success({
+        return continuum_success({
           task,
           parent,
           children,
@@ -200,7 +200,7 @@ export function arbeit_task_get({ directory }: { directory: string }) {
   })
 }
 
-export function arbeit_task_update({ directory }: { directory: string }) {
+export function continuum_task_update({ directory }: { directory: string }) {
   return tool({
     description: 'Update a task.',
     args: {
@@ -215,11 +215,11 @@ export function arbeit_task_update({ directory }: { directory: string }) {
       status: tool.schema.enum(['open', 'in_progress', 'completed', 'cancelled']).optional().describe('Updated status.')
     },
     async execute(args) {
-      return with_arbeit_error_handling(async () => {
+      return with_continuum_error_handling(async () => {
         const db = await get_db(directory)
         const task = await get_task(db, args.task_id)
         if (!task) {
-          throw new ArbeitError('TASK_NOT_FOUND', 'Task not found', TASK_NOT_FOUND_SUGGESTIONS)
+          throw new ContinuumError('TASK_NOT_FOUND', 'Task not found', TASK_NOT_FOUND_SUGGESTIONS)
         }
 
         if (args.status) {
@@ -238,7 +238,7 @@ export function arbeit_task_update({ directory }: { directory: string }) {
           if (args.status === 'completed') {
             const openBlockers = await has_open_blockers(db, candidate)
             if (openBlockers.length > 0) {
-              throw new ArbeitError('HAS_BLOCKERS', `Task has unresolved blockers: ${openBlockers.join(', ')}`, [
+              throw new ContinuumError('HAS_BLOCKERS', `Task has unresolved blockers: ${openBlockers.join(', ')}`, [
                 `Complete blockers first: ${openBlockers.join(', ')}`
               ])
             }
@@ -246,7 +246,7 @@ export function arbeit_task_update({ directory }: { directory: string }) {
 
           const missingStatus = validate_status_transition(candidate, args.status)
           if (missingStatus.length > 0) {
-            return arbeit_success({
+            return continuum_success({
               task,
               recommendations: { missing_fields: missingStatus, plan_template: TEMPLATE_RECOMMENDATIONS[candidate.type].plan_template }
             })
@@ -276,38 +276,38 @@ export function arbeit_task_update({ directory }: { directory: string }) {
         })
 
         const recommendations = merge_recommendations(undefined, missing)
-        return arbeit_success({ task: updatedTask, recommendations })
+        return continuum_success({ task: updatedTask, recommendations })
       })
     }
   })
 }
 
-export function arbeit_task_delete({ directory }: { directory: string }) {
+export function continuum_task_delete({ directory }: { directory: string }) {
   return tool({
     description: 'Soft delete a task.',
     args: {
       task_id: tool.schema.string().describe('Task ID.')
     },
     async execute(args) {
-      return with_arbeit_error_handling(async () => {
+      return with_continuum_error_handling(async () => {
         const db = await get_db(directory)
         const task = await get_task(db, args.task_id)
         if (!task) {
-          throw new ArbeitError('TASK_NOT_FOUND', 'Task not found', TASK_NOT_FOUND_SUGGESTIONS)
+          throw new ContinuumError('TASK_NOT_FOUND', 'Task not found', TASK_NOT_FOUND_SUGGESTIONS)
         }
 
         if (task.status === 'deleted') {
-          return arbeit_success({ deleted: true })
+          return continuum_success({ deleted: true })
         }
 
         const deleted = await update_task(db, args.task_id, { status: 'deleted' as TaskStatus })
-        return arbeit_success({ deleted: Boolean(deleted) })
+        return continuum_success({ deleted: Boolean(deleted) })
       })
     }
   })
 }
 
-export function arbeit_query({ directory }: { directory: string }) {
+export function continuum_query({ directory }: { directory: string }) {
   return tool({
     description: 'List and graph queries for tasks.',
     args: {
@@ -321,7 +321,7 @@ export function arbeit_query({ directory }: { directory: string }) {
         .optional()
     },
     async execute(args) {
-      return with_arbeit_error_handling(async () => {
+      return with_continuum_error_handling(async () => {
         const db = await get_db(directory)
         const params = args.params ?? {}
 
@@ -331,40 +331,40 @@ export function arbeit_query({ directory }: { directory: string }) {
               status: params.status as TaskStatus | undefined,
               parent_id: params.parent_id as string | null | undefined
             })
-            return arbeit_success({ tasks })
+            return continuum_success({ tasks })
           }
           case 'active_tasks': {
             const tasks = await list_tasks_by_statuses(db, {
               statuses: ['open', 'in_progress'],
               parent_id: params.parent_id as string | null | undefined
             })
-            return arbeit_success({ tasks })
+            return continuum_success({ tasks })
           }
           case 'children_of': {
             if (!params.task_id) {
-              throw new ArbeitError('TASK_NOT_FOUND', 'task_id is required', TASK_NOT_FOUND_SUGGESTIONS)
+              throw new ContinuumError('TASK_NOT_FOUND', 'task_id is required', TASK_NOT_FOUND_SUGGESTIONS)
             }
             const tasks = await list_tasks(db, { parent_id: params.task_id })
-            return arbeit_success({ tasks })
+            return continuum_success({ tasks })
           }
           case 'descendants_of': {
             if (!params.task_id) {
-              throw new ArbeitError('TASK_NOT_FOUND', 'task_id is required', TASK_NOT_FOUND_SUGGESTIONS)
+              throw new ContinuumError('TASK_NOT_FOUND', 'task_id is required', TASK_NOT_FOUND_SUGGESTIONS)
             }
             const tasks = await list_tasks(db)
             const descendants = collect_descendants(tasks, params.task_id)
-            return arbeit_success({ task_ids: descendants })
+            return continuum_success({ task_ids: descendants })
           }
           case 'ancestors_of': {
             if (!params.task_id) {
-              throw new ArbeitError('TASK_NOT_FOUND', 'task_id is required', TASK_NOT_FOUND_SUGGESTIONS)
+              throw new ContinuumError('TASK_NOT_FOUND', 'task_id is required', TASK_NOT_FOUND_SUGGESTIONS)
             }
             const tasks = await list_tasks(db)
             const ancestors = collect_ancestors(tasks, params.task_id)
-            return arbeit_success({ task_ids: ancestors })
+            return continuum_success({ task_ids: ancestors })
           }
           case 'templates': {
-            return arbeit_success({ templates: list_template_recommendations() })
+            return continuum_success({ templates: list_template_recommendations() })
           }
         }
       })
