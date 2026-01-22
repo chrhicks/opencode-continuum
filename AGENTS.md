@@ -40,7 +40,7 @@ continuum_step_complete({
 })
 ```
 
-Record discoveries and decisions as you go:
+**Record discoveries and decisions as you go** — this is critical for session resumption:
 ```
 continuum_task_discover({
   task_id: "tkt_xxx",
@@ -53,6 +53,22 @@ continuum_task_decide({
   rationale: "Only component that needs override"
 })
 ```
+
+#### What to Record
+
+**Discoveries** — things you learned that weren't obvious from the plan:
+- Unexpected API behavior or limitations
+- Missing dependencies or version conflicts
+- Existing code patterns you need to follow
+- Edge cases you encountered
+
+**Decisions** — choices you made during implementation:
+- Why you picked one approach over another
+- Trade-offs you accepted
+- Deviations from the original plan
+- Workarounds for blockers
+
+Even small decisions matter. A future session (or different agent) will lack your context — recordings bridge that gap.
 
 ### 4. Complete
 When all steps are done, complete the task with an outcome summary:
@@ -96,6 +112,7 @@ The response includes:
 | `continuum_task_discover` | Record a discovery |
 | `continuum_task_decide` | Record a decision with rationale |
 | `continuum_task_complete` | Finalize with outcome summary |
+| `continuum_task_cancel` | Cancel task with reason |
 | `continuum_query` | List/filter tasks |
 
 ## Key Principles
