@@ -260,24 +260,6 @@ export async function init_db(directory: string): Promise<void> {
   db.close()
 }
 
-export async function migrate_db(directory: string): Promise<{ from: number; to: number }> {
-  const db = new Database(dbFilePath(directory))
-  const migrations = await getMigrations()
-  const currentVersion = get_db_version(db)
-  
-  let appliedVersion = currentVersion
-  for (const migration of migrations) {
-    if (migration.version > currentVersion) {
-      db.run(migration.sql.trim())
-      set_db_version(db, migration.version)
-      appliedVersion = migration.version
-    }
-  }
-  
-  db.close()
-  return { from: currentVersion, to: appliedVersion }
-}
-
 export function is_valid_task_type(type: string): type is TaskType {
   return TASK_TYPES.includes(type as TaskType)
 }
@@ -285,10 +267,6 @@ export function is_valid_task_type(type: string): type is TaskType {
 export function resolve_template_type(template?: string): TaskType | null {
   if (!template) return null
   return TEMPLATE_TYPE_MAP[template as TemplateName] ?? null
-}
-
-export function get_template_recommendation(template: TemplateName): TemplateRecommendation {
-  return TEMPLATE_RECOMMENDATIONS[template]
 }
 
 export function list_template_recommendations(): TemplateRecommendation[] {
