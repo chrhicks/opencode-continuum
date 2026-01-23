@@ -14,7 +14,10 @@ import { resolve } from 'node:path'
 const ENTRY_POINT = 'src/plugin.ts'
 const OUTPUT_DIR = '.opencode/plugins'
 const OUTPUT_FILE = `${OUTPUT_DIR}/continuum.ts`
-const MIGRATION_SQL = 'src/migrations/001_initial.sql'
+const MIGRATIONS = [
+  { version: 1, path: 'src/migrations/001_initial.sql' },
+  { version: 2, path: 'src/migrations/002_execution_model.sql' },
+]
 
 // Bun plugin to replace migration loaders with inlined SQL
 function createMigrationPlugin(): import('bun').BunPlugin {
@@ -29,13 +32,26 @@ function createMigrationPlugin(): import('bun').BunPlugin {
       })
 
       build.onLoad({ filter: /.*/, namespace: 'inline-migration' }, async () => {
-        const sql = await Bun.file(MIGRATION_SQL).text()
+        const migrationEntries = await Promise.all(
+          MIGRATIONS.map(async (m) => {
+            const sql = await Bun.file(m.path).text()
+            return `  { version: ${m.version}, sql: ${JSON.stringify(sql)} }`
+          })
+        )
+        
         const contents = `
-// Auto-generated: SQL migration inlined at build time
-const MIGRATION_SQL = ${JSON.stringify(sql)};
+// Auto-generated: SQL migrations inlined at build time
+export interface Migration {
+  version: number
+  sql: string
+}
 
-export async function getMigrationSQL(): Promise<string> {
-  return MIGRATION_SQL;
+const MIGRATIONS: Migration[] = [
+${migrationEntries.join(',\n')}
+];
+
+export async function getMigrations(): Promise<Migration[]> {
+  return MIGRATIONS;
 }
 `
         return { contents, loader: 'ts' }

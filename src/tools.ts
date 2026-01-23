@@ -15,6 +15,13 @@ import {
   update_task,
   validate_status_transition,
   validate_task_input,
+  // Execution model
+  add_steps,
+  complete_step,
+  update_step,
+  add_discovery,
+  add_decision,
+  complete_task,
   type CreateTaskInput,
   type TaskStatus,
   type Task
@@ -401,4 +408,142 @@ function collect_ancestors(tasks: Task[], task_id: string): string[] {
     current = byId.get(current.parent_id)
   }
   return result
+}
+
+// =============================================================================
+// Execution Model Tools
+// =============================================================================
+
+export function continuum_step_add({ directory }: { directory: string }) {
+  return tool({
+    description: 'Add execution steps to a task. Steps define the tactical actions to complete the task.',
+    args: {
+      task_id: tool.schema.string().describe('Task ID.'),
+      steps: tool.schema.array(
+        tool.schema.object({
+          action: tool.schema.string().describe('What to do in this step.')
+        })
+      ).describe('Steps to add.')
+    },
+    async execute(args) {
+      return with_continuum_error_handling(async () => {
+        const db = await get_db(directory)
+        const task = await add_steps(db, {
+          task_id: args.task_id,
+          steps: args.steps
+        })
+        return continuum_success({ task })
+      })
+    }
+  })
+}
+
+export function continuum_step_complete({ directory }: { directory: string }) {
+  return tool({
+    description: 'Mark a step as completed. If step_id is not provided, completes the current_step. Auto-advances to the next pending step.',
+    args: {
+      task_id: tool.schema.string().describe('Task ID.'),
+      step_id: tool.schema.number().optional().describe('Step ID to complete. Defaults to current_step.'),
+      notes: tool.schema.string().optional().describe('Notes about how the step was completed.')
+    },
+    async execute(args) {
+      return with_continuum_error_handling(async () => {
+        const db = await get_db(directory)
+        const task = await complete_step(db, {
+          task_id: args.task_id,
+          step_id: args.step_id,
+          notes: args.notes
+        })
+        return continuum_success({ task })
+      })
+    }
+  })
+}
+
+export function continuum_step_update({ directory }: { directory: string }) {
+  return tool({
+    description: 'Update a step\'s action, status, or notes.',
+    args: {
+      task_id: tool.schema.string().describe('Task ID.'),
+      step_id: tool.schema.number().describe('Step ID to update.'),
+      action: tool.schema.string().optional().describe('Updated action text.'),
+      status: tool.schema.enum(['pending', 'in_progress', 'completed', 'skipped']).optional().describe('Updated status.'),
+      notes: tool.schema.string().optional().describe('Updated notes.')
+    },
+    async execute(args) {
+      return with_continuum_error_handling(async () => {
+        const db = await get_db(directory)
+        const task = await update_step(db, {
+          task_id: args.task_id,
+          step_id: args.step_id,
+          action: args.action,
+          status: args.status,
+          notes: args.notes
+        })
+        return continuum_success({ task })
+      })
+    }
+  })
+}
+
+export function continuum_task_discover({ directory }: { directory: string }) {
+  return tool({
+    description: 'Record a discovery made during task execution. Discoveries are things learned that may be useful later.',
+    args: {
+      task_id: tool.schema.string().describe('Task ID.'),
+      content: tool.schema.string().describe('What was discovered.')
+    },
+    async execute(args) {
+      return with_continuum_error_handling(async () => {
+        const db = await get_db(directory)
+        const task = await add_discovery(db, {
+          task_id: args.task_id,
+          content: args.content
+        })
+        return continuum_success({ task })
+      })
+    }
+  })
+}
+
+export function continuum_task_decide({ directory }: { directory: string }) {
+  return tool({
+    description: 'Record a decision made during task execution, with optional rationale.',
+    args: {
+      task_id: tool.schema.string().describe('Task ID.'),
+      content: tool.schema.string().describe('What was decided.'),
+      rationale: tool.schema.string().optional().describe('Why this decision was made.')
+    },
+    async execute(args) {
+      return with_continuum_error_handling(async () => {
+        const db = await get_db(directory)
+        const task = await add_decision(db, {
+          task_id: args.task_id,
+          content: args.content,
+          rationale: args.rationale
+        })
+        return continuum_success({ task })
+      })
+    }
+  })
+}
+
+export function continuum_task_complete({ directory }: { directory: string }) {
+  return tool({
+    description: 'Complete a task with an outcome summary. Records what actually happened vs. the plan.',
+    args: {
+      task_id: tool.schema.string().describe('Task ID.'),
+      outcome: tool.schema.string().describe('Summary of what was accomplished and any deviations from the plan.')
+    },
+    async execute(args) {
+      return with_continuum_error_handling(async () => {
+        const db = await get_db(directory)
+        const task = await complete_task(db, {
+          task_id: args.task_id,
+          outcome: args.outcome
+        })
+        return continuum_success({ task })
+      })
+    }
+  })
 }

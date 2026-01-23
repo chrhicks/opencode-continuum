@@ -5,12 +5,30 @@
  * When bundled: the build process replaces this with an inline version
  */
 
-let cachedMigration: string | null = null
+export interface Migration {
+  version: number
+  sql: string
+}
 
-export async function getMigrationSQL(): Promise<string> {
-  if (cachedMigration) return cachedMigration
+let cachedMigrations: Migration[] | null = null
 
-  const migrationPath = new URL('./migrations/001_initial.sql', import.meta.url).pathname
-  cachedMigration = await Bun.file(migrationPath).text()
-  return cachedMigration
+export async function getMigrations(): Promise<Migration[]> {
+  if (cachedMigrations) return cachedMigrations
+
+  const migrations: Migration[] = []
+  
+  const migration001Path = new URL('./migrations/001_initial.sql', import.meta.url).pathname
+  migrations.push({
+    version: 1,
+    sql: await Bun.file(migration001Path).text()
+  })
+
+  const migration002Path = new URL('./migrations/002_execution_model.sql', import.meta.url).pathname
+  migrations.push({
+    version: 2,
+    sql: await Bun.file(migration002Path).text()
+  })
+
+  cachedMigrations = migrations
+  return migrations
 }

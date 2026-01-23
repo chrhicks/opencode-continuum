@@ -2,10 +2,31 @@ import { Database } from 'bun:sqlite'
 import { randomId } from './db.utils'
 import { init_status } from './util'
 import { ContinuumError } from './error'
-import { getMigrationSQL } from './migration'
+import { getMigrations } from './migration'
 
 export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled'
 export type TaskType = 'epic' | 'feature' | 'bug' | 'investigation' | 'chore'
+export type StepStatus = 'pending' | 'in_progress' | 'completed' | 'skipped'
+
+export interface Step {
+  id: number
+  action: string
+  status: StepStatus
+  notes: string | null
+}
+
+export interface Discovery {
+  id: number
+  content: string
+  created_at: string
+}
+
+export interface Decision {
+  id: number
+  content: string
+  rationale: string | null
+  created_at: string
+}
 
 export interface Task {
   id: string
@@ -15,6 +36,14 @@ export interface Task {
   intent: string | null
   description: string | null
   plan: string | null
+  // Execution
+  steps: Step[]
+  current_step: number | null
+  // Memory
+  discoveries: Discovery[]
+  decisions: Decision[]
+  outcome: string | null
+  // Relationships
   parent_id: string | null
   blocked_by: string[]
   created_at: string
@@ -102,6 +131,11 @@ interface TaskRow {
   intent: string | null
   description: string | null
   plan: string | null
+  steps: string
+  current_step: number | null
+  discoveries: string
+  decisions: string
+  outcome: string | null
   parent_id: string | null
   blocked_by: string
   created_at: string
@@ -112,14 +146,30 @@ const dbFilePath = (directory: string) => `${directory}/.continuum/continuum.db`
 
 const dbCache = new Map<string, Database>()
 
-function parse_blocked_by(value: string | null): string[] {
-  if (!value) return []
+function parse_json_array<T>(value: string | null, defaultValue: T[] = []): T[] {
+  if (!value) return defaultValue
   try {
     const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : []
+    return Array.isArray(parsed) ? parsed : defaultValue
   } catch {
-    return []
+    return defaultValue
   }
+}
+
+function parse_blocked_by(value: string | null): string[] {
+  return parse_json_array<string>(value).filter((item) => typeof item === 'string')
+}
+
+function parse_steps(value: string | null): Step[] {
+  return parse_json_array<Step>(value)
+}
+
+function parse_discoveries(value: string | null): Discovery[] {
+  return parse_json_array<Discovery>(value)
+}
+
+function parse_decisions(value: string | null): Decision[] {
+  return parse_json_array<Decision>(value)
 }
 
 function row_to_task(row: TaskRow): Task {
@@ -131,12 +181,19 @@ function row_to_task(row: TaskRow): Task {
     intent: row.intent,
     description: row.description,
     plan: row.plan,
+    steps: parse_steps(row.steps),
+    current_step: row.current_step,
+    discoveries: parse_discoveries(row.discoveries),
+    decisions: parse_decisions(row.decisions),
+    outcome: row.outcome,
     parent_id: row.parent_id,
     blocked_by: parse_blocked_by(row.blocked_by),
     created_at: row.created_at,
     updated_at: row.updated_at
   }
 }
+
+const TASK_COLUMNS = `id, title, type, status, intent, description, plan, steps, current_step, discoveries, decisions, outcome, parent_id, blocked_by, created_at, updated_at`
 
 export async function get_db(directory: string): Promise<Database> {
   const status = await init_status({ directory })
@@ -157,15 +214,68 @@ export async function get_db(directory: string): Promise<Database> {
   }
 
   const db = new Database(dbFilePath(directory))
+  
+  // Auto-migrate on first access
+  const migrations = await getMigrations()
+  const currentVersion = get_db_version(db)
+  const latestVersion = migrations[migrations.length - 1]?.version ?? 0
+  
+  if (currentVersion < latestVersion) {
+    for (const migration of migrations) {
+      if (migration.version > currentVersion) {
+        db.run(migration.sql.trim())
+        set_db_version(db, migration.version)
+      }
+    }
+  }
+  
   dbCache.set(directory, db)
   return db
 }
 
+function get_db_version(db: Database): number {
+  try {
+    const result = db.query<{ user_version: number }, []>('PRAGMA user_version').get()
+    return result?.user_version ?? 0
+  } catch {
+    return 0
+  }
+}
+
+function set_db_version(db: Database, version: number): void {
+  db.run(`PRAGMA user_version = ${version}`)
+}
+
 export async function init_db(directory: string): Promise<void> {
   const db = new Database(dbFilePath(directory))
-  const migrationSQL = await getMigrationSQL()
-  db.run(migrationSQL.trim())
+  const migrations = await getMigrations()
+  
+  // Run initial migration for new databases
+  const initialMigration = migrations[0]
+  if (initialMigration) {
+    db.run(initialMigration.sql.trim())
+    set_db_version(db, initialMigration.version)
+  }
+  
   db.close()
+}
+
+export async function migrate_db(directory: string): Promise<{ from: number; to: number }> {
+  const db = new Database(dbFilePath(directory))
+  const migrations = await getMigrations()
+  const currentVersion = get_db_version(db)
+  
+  let appliedVersion = currentVersion
+  for (const migration of migrations) {
+    if (migration.version > currentVersion) {
+      db.run(migration.sql.trim())
+      set_db_version(db, migration.version)
+      appliedVersion = migration.version
+    }
+  }
+  
+  db.close()
+  return { from: currentVersion, to: appliedVersion }
 }
 
 export function is_valid_task_type(type: string): type is TaskType {
@@ -327,8 +437,7 @@ export async function create_task(db: Database, input: CreateTaskInput): Promise
   }
 
   const row = db.query<TaskRow, [string]>(
-    `SELECT id, title, type, status, intent, description, plan, parent_id, blocked_by, created_at, updated_at
-     FROM tasks WHERE id = ?`
+    `SELECT ${TASK_COLUMNS} FROM tasks WHERE id = ?`
   ).get(id)
 
   if (!row) {
@@ -416,8 +525,7 @@ export async function update_task(db: Database, task_id: string, input: UpdateTa
   }
 
   const row = db.query<TaskRow, [string]>(
-    `SELECT id, title, type, status, intent, description, plan, parent_id, blocked_by, created_at, updated_at
-     FROM tasks WHERE id = ?`
+    `SELECT ${TASK_COLUMNS} FROM tasks WHERE id = ?`
   ).get(task_id)
 
   if (!row) {
@@ -429,8 +537,7 @@ export async function update_task(db: Database, task_id: string, input: UpdateTa
 
 export async function get_task(db: Database, task_id: string): Promise<Task | null> {
   const row = db.query<TaskRow, [string]>(
-    `SELECT id, title, type, status, intent, description, plan, parent_id, blocked_by, created_at, updated_at
-     FROM tasks WHERE id = ?`
+    `SELECT ${TASK_COLUMNS} FROM tasks WHERE id = ?`
   ).get(task_id)
 
   return row ? row_to_task(row) : null
@@ -455,7 +562,7 @@ export async function list_tasks(db: Database, filters: ListTaskFilters = {}): P
   }
 
   const sql = `
-    SELECT id, title, type, status, intent, description, plan, parent_id, blocked_by, created_at, updated_at
+    SELECT ${TASK_COLUMNS}
     FROM tasks
     WHERE ${where.join(' AND ')}
     ORDER BY created_at ASC
@@ -488,7 +595,7 @@ export async function list_tasks_by_statuses(
   }
 
   const sql = `
-    SELECT id, title, type, status, intent, description, plan, parent_id, blocked_by, created_at, updated_at
+    SELECT ${TASK_COLUMNS}
     FROM tasks
     WHERE ${where.join(' AND ')}
     ORDER BY created_at ASC
@@ -496,4 +603,241 @@ export async function list_tasks_by_statuses(
 
   const rows = db.query<TaskRow, Array<string | null>>(sql).all(...params)
   return rows.map(row_to_task)
+}
+
+// =============================================================================
+// Execution Model Functions
+// =============================================================================
+
+export interface AddStepsInput {
+  task_id: string
+  steps: Array<{ action: string }>
+}
+
+export async function add_steps(db: Database, input: AddStepsInput): Promise<Task> {
+  const task = await get_task(db, input.task_id)
+  if (!task) {
+    throw new ContinuumError('TASK_NOT_FOUND', 'Task not found')
+  }
+
+  const existingSteps = task.steps
+  const maxId = existingSteps.reduce((max, s) => Math.max(max, s.id), 0)
+
+  const newSteps: Step[] = input.steps.map((s, i) => ({
+    id: maxId + i + 1,
+    action: s.action,
+    status: 'pending' as StepStatus,
+    notes: null
+  }))
+
+  const allSteps = [...existingSteps, ...newSteps]
+  
+  // If no current_step set and we have steps, set to first pending
+  let currentStep = task.current_step
+  if (currentStep === null && allSteps.length > 0) {
+    const firstPending = allSteps.find(s => s.status === 'pending')
+    currentStep = firstPending?.id ?? null
+  }
+
+  const result = db.run(
+    `UPDATE tasks SET steps = ?, current_step = ?, updated_at = ? WHERE id = ?`,
+    [JSON.stringify(allSteps), currentStep, new Date().toISOString(), input.task_id]
+  )
+
+  if (result.changes === 0) {
+    throw new ContinuumError('TASK_UPDATE_FAILED', 'Failed to add steps')
+  }
+
+  return (await get_task(db, input.task_id))!
+}
+
+export interface CompleteStepInput {
+  task_id: string
+  step_id?: number  // If not provided, completes current_step
+  notes?: string
+}
+
+export async function complete_step(db: Database, input: CompleteStepInput): Promise<Task> {
+  const task = await get_task(db, input.task_id)
+  if (!task) {
+    throw new ContinuumError('TASK_NOT_FOUND', 'Task not found')
+  }
+
+  const stepId = input.step_id ?? task.current_step
+  if (stepId === null) {
+    throw new ContinuumError('ITEM_NOT_FOUND', 'No step to complete (no current_step set)', [
+      'Add steps first using step_add, or specify step_id explicitly'
+    ])
+  }
+
+  const stepIndex = task.steps.findIndex(s => s.id === stepId)
+  if (stepIndex === -1) {
+    throw new ContinuumError('ITEM_NOT_FOUND', `Step ${stepId} not found`)
+  }
+
+  const existingStep = task.steps[stepIndex]!
+  const updatedSteps = [...task.steps]
+  updatedSteps[stepIndex] = {
+    id: existingStep.id,
+    action: existingStep.action,
+    status: 'completed',
+    notes: input.notes ?? existingStep.notes
+  }
+
+  // Auto-advance to next pending step
+  let nextStep: number | null = null
+  for (const step of updatedSteps) {
+    if (step.status === 'pending') {
+      nextStep = step.id
+      break
+    }
+  }
+
+  const result = db.run(
+    `UPDATE tasks SET steps = ?, current_step = ?, updated_at = ? WHERE id = ?`,
+    [JSON.stringify(updatedSteps), nextStep, new Date().toISOString(), input.task_id]
+  )
+
+  if (result.changes === 0) {
+    throw new ContinuumError('TASK_UPDATE_FAILED', 'Failed to complete step')
+  }
+
+  return (await get_task(db, input.task_id))!
+}
+
+export interface UpdateStepInput {
+  task_id: string
+  step_id: number
+  action?: string
+  status?: StepStatus
+  notes?: string
+}
+
+export async function update_step(db: Database, input: UpdateStepInput): Promise<Task> {
+  const task = await get_task(db, input.task_id)
+  if (!task) {
+    throw new ContinuumError('TASK_NOT_FOUND', 'Task not found')
+  }
+
+  const stepIndex = task.steps.findIndex(s => s.id === input.step_id)
+  if (stepIndex === -1) {
+    throw new ContinuumError('ITEM_NOT_FOUND', `Step ${input.step_id} not found`)
+  }
+
+  const existingStep = task.steps[stepIndex]!
+  const updatedSteps = [...task.steps]
+  updatedSteps[stepIndex] = {
+    id: existingStep.id,
+    action: input.action ?? existingStep.action,
+    status: input.status ?? existingStep.status,
+    notes: input.notes !== undefined ? input.notes : existingStep.notes
+  }
+
+  const result = db.run(
+    `UPDATE tasks SET steps = ?, updated_at = ? WHERE id = ?`,
+    [JSON.stringify(updatedSteps), new Date().toISOString(), input.task_id]
+  )
+
+  if (result.changes === 0) {
+    throw new ContinuumError('TASK_UPDATE_FAILED', 'Failed to update step')
+  }
+
+  return (await get_task(db, input.task_id))!
+}
+
+export interface AddDiscoveryInput {
+  task_id: string
+  content: string
+}
+
+export async function add_discovery(db: Database, input: AddDiscoveryInput): Promise<Task> {
+  const task = await get_task(db, input.task_id)
+  if (!task) {
+    throw new ContinuumError('TASK_NOT_FOUND', 'Task not found')
+  }
+
+  const maxId = task.discoveries.reduce((max, d) => Math.max(max, d.id), 0)
+  const discovery: Discovery = {
+    id: maxId + 1,
+    content: input.content,
+    created_at: new Date().toISOString()
+  }
+
+  const discoveries = [...task.discoveries, discovery]
+
+  const result = db.run(
+    `UPDATE tasks SET discoveries = ?, updated_at = ? WHERE id = ?`,
+    [JSON.stringify(discoveries), new Date().toISOString(), input.task_id]
+  )
+
+  if (result.changes === 0) {
+    throw new ContinuumError('TASK_UPDATE_FAILED', 'Failed to add discovery')
+  }
+
+  return (await get_task(db, input.task_id))!
+}
+
+export interface AddDecisionInput {
+  task_id: string
+  content: string
+  rationale?: string
+}
+
+export async function add_decision(db: Database, input: AddDecisionInput): Promise<Task> {
+  const task = await get_task(db, input.task_id)
+  if (!task) {
+    throw new ContinuumError('TASK_NOT_FOUND', 'Task not found')
+  }
+
+  const maxId = task.decisions.reduce((max, d) => Math.max(max, d.id), 0)
+  const decision: Decision = {
+    id: maxId + 1,
+    content: input.content,
+    rationale: input.rationale ?? null,
+    created_at: new Date().toISOString()
+  }
+
+  const decisions = [...task.decisions, decision]
+
+  const result = db.run(
+    `UPDATE tasks SET decisions = ?, updated_at = ? WHERE id = ?`,
+    [JSON.stringify(decisions), new Date().toISOString(), input.task_id]
+  )
+
+  if (result.changes === 0) {
+    throw new ContinuumError('TASK_UPDATE_FAILED', 'Failed to add decision')
+  }
+
+  return (await get_task(db, input.task_id))!
+}
+
+export interface CompleteTaskInput {
+  task_id: string
+  outcome: string
+}
+
+export async function complete_task(db: Database, input: CompleteTaskInput): Promise<Task> {
+  const task = await get_task(db, input.task_id)
+  if (!task) {
+    throw new ContinuumError('TASK_NOT_FOUND', 'Task not found')
+  }
+
+  // Check for open blockers
+  const openBlockers = await has_open_blockers(db, task)
+  if (openBlockers.length > 0) {
+    throw new ContinuumError('HAS_BLOCKERS', `Task has unresolved blockers: ${openBlockers.join(', ')}`, [
+      `Complete blockers first: ${openBlockers.join(', ')}`
+    ])
+  }
+
+  const result = db.run(
+    `UPDATE tasks SET status = 'completed', outcome = ?, updated_at = ? WHERE id = ?`,
+    [input.outcome, new Date().toISOString(), input.task_id]
+  )
+
+  if (result.changes === 0) {
+    throw new ContinuumError('TASK_UPDATE_FAILED', 'Failed to complete task')
+  }
+
+  return (await get_task(db, input.task_id))!
 }
