@@ -32,9 +32,3 @@ export async function getMigrations(): Promise<Migration[]> {
   cachedMigrations = migrations
   return migrations
 }
-
-// Backwards compatibility
-export async function getMigrationSQL(): Promise<string> {
-  const migrations = await getMigrations()
-  return migrations[0]?.sql ?? ''
-}

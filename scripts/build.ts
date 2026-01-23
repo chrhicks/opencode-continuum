@@ -53,11 +53,6 @@ ${migrationEntries.join(',\n')}
 export async function getMigrations(): Promise<Migration[]> {
   return MIGRATIONS;
 }
-
-// Backwards compatibility
-export async function getMigrationSQL(): Promise<string> {
-  return MIGRATIONS[0]?.sql ?? '';
-}
 `
         return { contents, loader: 'ts' }
       })

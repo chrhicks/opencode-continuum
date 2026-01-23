@@ -18,7 +18,7 @@ import {
   continuum_task_complete
 } from './tools'
 
-type ArbeitResponse<T> = {
+type ContinuumResponse<T> = {
   success: boolean
   data?: T
   error?: {
@@ -32,9 +32,9 @@ async function createTempDir(): Promise<string> {
   return await mkdtemp(join(tmpdir(), 'continuum-tools-'))
 }
 
-async function runTool<T>(toolInstance: any, args: any, context?: any): Promise<ArbeitResponse<T>> {
+async function runTool<T>(toolInstance: any, args: any, context?: any): Promise<ContinuumResponse<T>> {
   const raw = context === undefined ? await toolInstance.execute(args) : await toolInstance.execute(args, context)
-  return JSON.parse(raw) as ArbeitResponse<T>
+  return JSON.parse(raw) as ContinuumResponse<T>
 }
 
 async function closeDb(directory: string) {
