@@ -18,6 +18,9 @@ const MIGRATIONS = [
   { version: 1, path: 'src/migrations/001_initial.sql' },
   { version: 2, path: 'src/migrations/002_execution_model.sql' },
 ]
+const STATIC_CONTENT = {
+  continuum_init_guide: 'src/static/instructions/continuum_init.md',
+}
 
 // Bun plugin to replace migration loaders with inlined SQL
 function createMigrationPlugin(): import('bun').BunPlugin {
@@ -60,6 +63,38 @@ export async function getMigrations(): Promise<Migration[]> {
   }
 }
 
+// Bun plugin to inline static content (markdown, etc.) at build time
+function createStaticContentPlugin(): import('bun').BunPlugin {
+  return {
+    name: 'inline-static',
+    setup(build) {
+      build.onResolve({ filter: /\.\/static-content$/ }, (args) => {
+        return {
+          path: resolve(args.resolveDir, 'static-content.ts'),
+          namespace: 'inline-static',
+        }
+      })
+
+      build.onLoad({ filter: /.*/, namespace: 'inline-static' }, async () => {
+        const entries = await Promise.all(
+          Object.entries(STATIC_CONTENT).map(async ([key, path]) => {
+            const content = await Bun.file(path).text()
+            return `  ${key}: ${JSON.stringify(content)}`
+          })
+        )
+        
+        const contents = `
+// Auto-generated: Static content inlined at build time
+export const STATIC = {
+${entries.join(',\n')}
+};
+`
+        return { contents, loader: 'ts' }
+      })
+    },
+  }
+}
+
 async function runTests(): Promise<boolean> {
   console.log('Running tests...')
   const proc = Bun.spawn(['bun', 'test'], {
@@ -82,7 +117,7 @@ async function bundle(): Promise<boolean> {
     naming: 'continuum.ts',
     target: 'bun',
     format: 'esm',
-    plugins: [createMigrationPlugin()],
+    plugins: [createMigrationPlugin(), createStaticContentPlugin()],
     // Don't bundle the plugin runtime - it's provided by OpenCode
     external: ['@opencode-ai/plugin', '@opencode-ai/sdk'],
   })
