@@ -1,6 +1,7 @@
 import { tool } from '@opencode-ai/plugin'
 import { ContinuumError, isContinuumError } from './error'
 import { init_project } from './util'
+import { STATIC } from './static-content'
 import {
   TEMPLATE_RECOMMENDATIONS,
   create_task,
@@ -68,29 +69,6 @@ function merge_recommendations(
   }
 }
 
-const GUIDE_MARKDOWN = `# Continuum Quickstart (Agent Guide)
-
-## 1) Read the user prompt
-- Restate the goal in 1-2 sentences.
-- Ask clarifying questions if requirements or constraints are missing.
-
-## 2) Decide the task shape
-- If starting new work: choose a template (epic, feature, bug, investigation, chore).
-- If resuming: list active tasks and pick the most relevant one.
-
-## 3) Capture concrete details
-- Always fill description (what) and intent (why, when applicable).
-- For feature/bug/investigation/chore, add a plan using the template stub.
-
-## 4) Structure and dependencies
-- Use parent_id for hierarchy.
-- Use blocked_by for dependencies; don’t complete tasks while blocked.
-
-## 5) Execute and update
-- Move to in_progress only once the plan is filled.
-- Update status and fields as decisions change.
-`
-
 export function continuum_init({ directory }: { directory: string }) {
   return tool({
     description: 'Initialize the continuum database.',
@@ -101,7 +79,7 @@ export function continuum_init({ directory }: { directory: string }) {
         return continuum_success({
           initialized: true,
           path: `${directory}/.continuum/continuum.db`,
-          guide_markdown: GUIDE_MARKDOWN
+          guide_markdown: STATIC.continuum_init_guide
         })
       })
     }
@@ -421,7 +399,9 @@ export function continuum_step_add({ directory }: { directory: string }) {
       task_id: tool.schema.string().describe('Task ID.'),
       steps: tool.schema.array(
         tool.schema.object({
-          action: tool.schema.string().describe('What to do in this step.')
+          title: tool.schema.string().optional().describe('Short step name (e.g., "Create ThemeContext").'),
+          summary: tool.schema.string().optional().describe('1-2 sentence description of what this step accomplishes.'),
+          details: tool.schema.string().optional().describe('Full specification: files, functions, APIs, specific values. Enough detail for any agent to execute blindly.')
         })
       ).describe('Steps to add.')
     },
@@ -462,11 +442,13 @@ export function continuum_step_complete({ directory }: { directory: string }) {
 
 export function continuum_step_update({ directory }: { directory: string }) {
   return tool({
-    description: 'Update a step\'s action, status, or notes.',
+    description: 'Update a step\'s title, summary, details, status, or notes.',
     args: {
       task_id: tool.schema.string().describe('Task ID.'),
       step_id: tool.schema.number().describe('Step ID to update.'),
-      action: tool.schema.string().optional().describe('Updated action text.'),
+      title: tool.schema.string().optional().describe('Updated step title.'),
+      summary: tool.schema.string().optional().describe('Updated summary.'),
+      details: tool.schema.string().optional().describe('Updated details.'),
       status: tool.schema.enum(['pending', 'in_progress', 'completed', 'skipped']).optional().describe('Updated status.'),
       notes: tool.schema.string().optional().describe('Updated notes.')
     },
@@ -476,7 +458,9 @@ export function continuum_step_update({ directory }: { directory: string }) {
         const task = await update_step(db, {
           task_id: args.task_id,
           step_id: args.step_id,
-          action: args.action,
+          title: args.title,
+          summary: args.summary,
+          details: args.details,
           status: args.status,
           notes: args.notes
         })

@@ -308,15 +308,15 @@ describe('tools', () => {
     const response = await runTool<{ task: Task }>(stepAddTool, {
       task_id: created.data!.task.id,
       steps: [
-        { action: 'Create component' },
-        { action: 'Add tests' },
-        { action: 'Update docs' }
+        { title: 'Create component', summary: 'Build the UI component' },
+        { title: 'Add tests', summary: 'Write unit tests' },
+        { title: 'Update docs', summary: 'Document the component' }
       ]
     })
 
     expect(response.success).toBe(true)
     expect(response.data?.task.steps).toHaveLength(3)
-    expect(response.data?.task.steps[0].action).toBe('Create component')
+    expect(response.data?.task.steps[0].title).toBe('Create component')
     expect(response.data?.task.steps[0].status).toBe('pending')
     expect(response.data?.task.current_step).toBe(1)
   })
@@ -337,8 +337,8 @@ describe('tools', () => {
     await runTool<{ task: Task }>(stepAddTool, {
       task_id: created.data!.task.id,
       steps: [
-        { action: 'Step 1' },
-        { action: 'Step 2' }
+        { title: 'Step 1' },
+        { title: 'Step 2' }
       ]
     })
 
@@ -368,19 +368,19 @@ describe('tools', () => {
 
     await runTool<{ task: Task }>(stepAddTool, {
       task_id: created.data!.task.id,
-      steps: [{ action: 'Original action' }]
+      steps: [{ title: 'Original title', summary: 'Original summary' }]
     })
 
     const response = await runTool<{ task: Task }>(stepUpdateTool, {
       task_id: created.data!.task.id,
       step_id: 1,
-      action: 'Updated action',
+      title: 'Updated title',
       status: 'skipped',
       notes: 'Skipped because unnecessary'
     })
 
     expect(response.success).toBe(true)
-    expect(response.data?.task.steps[0].action).toBe('Updated action')
+    expect(response.data?.task.steps[0].title).toBe('Updated title')
     expect(response.data?.task.steps[0].status).toBe('skipped')
     expect(response.data?.task.steps[0].notes).toBe('Skipped because unnecessary')
   })
@@ -506,9 +506,9 @@ describe('tools', () => {
     await runTool<{ task: Task }>(stepAddTool, {
       task_id: taskId,
       steps: [
-        { action: 'Create ThemeContext' },
-        { action: 'Add toggle component' },
-        { action: 'Implement CSS variables' }
+        { title: 'Create ThemeContext', summary: 'Build state management' },
+        { title: 'Add toggle component', summary: 'Build UI toggle' },
+        { title: 'Implement CSS variables', summary: 'Define theme tokens' }
       ]
     })
 

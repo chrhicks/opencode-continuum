@@ -10,7 +10,9 @@ export type StepStatus = 'pending' | 'in_progress' | 'completed' | 'skipped'
 
 export interface Step {
   id: number
-  action: string
+  title?: string
+  summary?: string
+  details?: string
   status: StepStatus
   notes: string | null
 }
@@ -589,7 +591,11 @@ export async function list_tasks_by_statuses(
 
 export interface AddStepsInput {
   task_id: string
-  steps: Array<{ action: string }>
+  steps: Array<{
+    title?: string
+    summary?: string
+    details?: string
+  }>
 }
 
 export async function add_steps(db: Database, input: AddStepsInput): Promise<Task> {
@@ -603,7 +609,9 @@ export async function add_steps(db: Database, input: AddStepsInput): Promise<Tas
 
   const newSteps: Step[] = input.steps.map((s, i) => ({
     id: maxId + i + 1,
-    action: s.action,
+    title: s.title,
+    summary: s.summary,
+    details: s.details,
     status: 'pending' as StepStatus,
     notes: null
   }))
@@ -657,7 +665,9 @@ export async function complete_step(db: Database, input: CompleteStepInput): Pro
   const updatedSteps = [...task.steps]
   updatedSteps[stepIndex] = {
     id: existingStep.id,
-    action: existingStep.action,
+    title: existingStep.title,
+    summary: existingStep.summary,
+    details: existingStep.details,
     status: 'completed',
     notes: input.notes ?? existingStep.notes
   }
@@ -686,7 +696,9 @@ export async function complete_step(db: Database, input: CompleteStepInput): Pro
 export interface UpdateStepInput {
   task_id: string
   step_id: number
-  action?: string
+  title?: string
+  summary?: string
+  details?: string
   status?: StepStatus
   notes?: string
 }
@@ -706,7 +718,9 @@ export async function update_step(db: Database, input: UpdateStepInput): Promise
   const updatedSteps = [...task.steps]
   updatedSteps[stepIndex] = {
     id: existingStep.id,
-    action: input.action ?? existingStep.action,
+    title: input.title ?? existingStep.title,
+    summary: input.summary ?? existingStep.summary,
+    details: input.details ?? existingStep.details,
     status: input.status ?? existingStep.status,
     notes: input.notes !== undefined ? input.notes : existingStep.notes
   }
