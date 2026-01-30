@@ -66,6 +66,62 @@ continuum_query({ query: "tasks" })
 - Tasks track intent, description, plan, and dependencies so work can resume later.
 - Status transitions are validated (e.g., plans required before moving to `in_progress`).
 
+## CLI
+
+View tasks from the command line.
+
+### Install globally
+
+```bash
+# Install to ~/.local/bin
+./install.sh
+
+# Or install to /usr/local/bin (requires sudo)
+./install.sh --global
+
+# Uninstall
+./install.sh --uninstall
+```
+
+Ensure `~/.local/bin` is in your PATH:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### Usage
+
+```bash
+# Initialize continuum in current directory
+continuum init
+
+# List all tasks
+continuum list
+
+# Filter by status or type
+continuum list --status=open
+continuum list --type=feature
+
+# View task details
+continuum view <task_id>
+
+# View epic with all children (compact format for agents)
+continuum view <task_id> --tree
+
+# Help
+continuum --help
+```
+
+### Development
+
+Run without installing:
+
+```bash
+bun run cli list
+bun run cli view <task_id>
+```
+
 ## TODO
 - Add npm distribution and CLI installer instructions.
 
