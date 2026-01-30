@@ -6,7 +6,8 @@
   "scripts": {
     "build": "bun scripts/build.ts",
     "dev": "bun scripts/dev.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "cli": "bun src/cli.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.3.6"
